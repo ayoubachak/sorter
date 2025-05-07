@@ -358,11 +358,46 @@ async function mergeSort(arr) {
     
     const mid = Math.floor(arr.length / 2);
     
-    // Highlight the split operation
+    // Highlight the split operation and send explicit visualization
     updateActiveIndices([0, mid, arr.length - 1]);
+    
+    // Send explicit split visualization
+    self.postMessage({
+        type: 'worker_visual_update',
+        data: {
+            workerId: state.workerId,
+            indices: [0, mid, arr.length - 1],
+            array: [...arr],
+            stats: {
+                operation: 'split',
+                metrics: { ...state.metrics },
+                activeIndices: [0, mid, arr.length - 1],
+                focusRegion: { min: 0, max: arr.length - 1 }
+            }
+        }
+    });
     
     const left = await mergeSort(arr.slice(0, mid));
     const right = await mergeSort(arr.slice(mid));
+    
+    // Send visualization for merging phase
+    const leftIndices = Array.from({ length: left.length }, (_, i) => i);
+    const rightIndices = Array.from({ length: right.length }, (_, i) => mid + i);
+    
+    self.postMessage({
+        type: 'worker_visual_update',
+        data: {
+            workerId: state.workerId,
+            indices: [...leftIndices, ...rightIndices],
+            array: [...arr],
+            stats: {
+                operation: 'merge',
+                metrics: { ...state.metrics },
+                activeIndices: [...leftIndices, ...rightIndices],
+                focusRegion: { min: 0, max: arr.length - 1 }
+            }
+        }
+    });
     
     // Send progress updates
     updateProgress();
@@ -381,6 +416,23 @@ async function merge(left, right) {
     // Create visual map of original indices
     const leftStart = 0;
     const rightStart = left.length;
+    const totalLength = left.length + right.length;
+    
+    // Send visualization for start of merging
+    self.postMessage({
+        type: 'worker_visual_update',
+        data: {
+            workerId: state.workerId,
+            indices: Array.from({ length: totalLength }, (_, i) => i),
+            array: [...left, ...right], // Show the two arrays being merged
+            stats: {
+                operation: 'merge',
+                metrics: { ...state.metrics },
+                activeIndices: [],
+                focusRegion: { min: 0, max: totalLength - 1 }
+            }
+        }
+    });
     
     while (leftIndex < left.length && rightIndex < right.length) {
         state.metrics.comparisons++;
@@ -389,18 +441,78 @@ async function merge(left, right) {
         // Highlight the elements being compared
         updateActiveIndices([leftStart + leftIndex, rightStart + rightIndex]);
         
+        // Send comparison visualization
+        if ((leftIndex + rightIndex) % 3 === 0) {
+            // Create temporary merged array for visualization
+            const tempArray = [
+                ...left.slice(0, leftIndex), 
+                ...result, 
+                ...left.slice(leftIndex),
+                ...right.slice(rightIndex)
+            ];
+            
+            self.postMessage({
+                type: 'worker_visual_update',
+                data: {
+                    workerId: state.workerId,
+                    indices: [leftStart + leftIndex, rightStart + rightIndex],
+                    array: tempArray,
+                    stats: {
+                        operation: 'merge-comparison',
+                        metrics: { ...state.metrics },
+                        activeIndices: [leftStart + leftIndex, rightStart + rightIndex],
+                        values: [left[leftIndex], right[rightIndex]]
+                    }
+                }
+            });
+        }
+        
         await applyDelay();
         
         if (left[leftIndex] <= right[rightIndex]) {
             result.push(left[leftIndex]);
+            
+            // Visualize element being placed in result
+            self.postMessage({
+                type: 'worker_visual_update',
+                data: {
+                    workerId: state.workerId,
+                    indices: [leftStart + leftIndex, result.length - 1],
+                    array: null,
+                    stats: {
+                        operation: 'merge-place',
+                        metrics: { ...state.metrics },
+                        activeIndices: [leftStart + leftIndex],
+                        value: left[leftIndex]
+                    }
+                }
+            });
+            
             leftIndex++;
         } else {
             result.push(right[rightIndex]);
+            
+            // Visualize element being placed in result
+            self.postMessage({
+                type: 'worker_visual_update',
+                data: {
+                    workerId: state.workerId,
+                    indices: [rightStart + rightIndex, result.length - 1],
+                    array: null,
+                    stats: {
+                        operation: 'merge-place',
+                        metrics: { ...state.metrics },
+                        activeIndices: [rightStart + rightIndex],
+                        value: right[rightIndex]
+                    }
+                }
+            });
+            
             rightIndex++;
         }
         
         // Periodically update progress
-        if (state.totalOperations % 10 === 0) {
+        if (state.totalOperations % 5 === 0) {
             updateProgress();
         }
     }
@@ -408,8 +520,40 @@ async function merge(left, right) {
     // Add remaining elements and highlight
     if (leftIndex < left.length) {
         updateActiveIndices([leftStart + leftIndex]);
+        
+        // Visualize remaining left elements
+        self.postMessage({
+            type: 'worker_visual_update',
+            data: {
+                workerId: state.workerId,
+                indices: Array.from({ length: left.length - leftIndex }, (_, i) => leftStart + leftIndex + i),
+                array: null,
+                stats: {
+                    operation: 'merge-remaining',
+                    metrics: { ...state.metrics },
+                    activeIndices: Array.from({ length: left.length - leftIndex }, (_, i) => leftStart + leftIndex + i),
+                    side: 'left'
+                }
+            }
+        });
     } else if (rightIndex < right.length) {
         updateActiveIndices([rightStart + rightIndex]);
+        
+        // Visualize remaining right elements
+        self.postMessage({
+            type: 'worker_visual_update',
+            data: {
+                workerId: state.workerId,
+                indices: Array.from({ length: right.length - rightIndex }, (_, i) => rightStart + rightIndex + i),
+                array: null,
+                stats: {
+                    operation: 'merge-remaining',
+                    metrics: { ...state.metrics },
+                    activeIndices: Array.from({ length: right.length - rightIndex }, (_, i) => rightStart + rightIndex + i),
+                    side: 'right'
+                }
+            }
+        });
     }
     
     // Add remaining elements
@@ -422,6 +566,21 @@ async function merge(left, right) {
         state.array[i] = resultArray[i];
     }
     
+    // Send final merged array visualization
+    self.postMessage({
+        type: 'worker_visual_update',
+        data: {
+            workerId: state.workerId,
+            indices: Array.from({ length: resultArray.length }, (_, i) => i),
+            array: [...resultArray],
+            stats: {
+                operation: 'merge-complete',
+                metrics: { ...state.metrics },
+                activeIndices: Array.from({ length: resultArray.length }, (_, i) => i)
+            }
+        }
+    });
+    
     updateProgress();
     return resultArray;
 }
@@ -433,6 +592,23 @@ async function quickSort(arr, low = 0, high = arr.length - 1) {
     if (low < high) {
         // Highlight the current partition
         updateActiveIndices([low, high]);
+        
+        // Send explicit partition operation notification
+        // to ensure visualization during partitioning phase
+        self.postMessage({
+            type: 'worker_visual_update',
+            data: {
+                workerId: state.workerId,
+                indices: [low, high],
+                array: arr,
+                stats: {
+                    operation: 'partition',
+                    metrics: { ...state.metrics },
+                    activeIndices: [low, high],
+                    focusRegion: { min: low, max: high }
+                }
+            }
+        });
         
         const pivotIndex = await partition(arr, low, high);
         
@@ -453,24 +629,145 @@ async function partition(arr, low, high) {
     const pivot = await arrayAccess(arr, high);
     let i = low - 1;
     
-    // Highlight the pivot
+    // Highlight the pivot and send explicit visualization
     updateActiveIndices([high]);
+    
+    // Send explicit notification about pivot selection
+    self.postMessage({
+        type: 'worker_visual_update',
+        data: {
+            workerId: state.workerId,
+            indices: [high],
+            array: [...arr],
+            stats: {
+                operation: 'pivot',
+                metrics: { ...state.metrics },
+                activeIndices: [high],
+                focusRegion: { min: low, max: high }
+            }
+        }
+    });
+    
     await applyDelay();
+    
+    // Mark the entire region being partitioned
+    const partitionIndices = Array.from({ length: high - low + 1 }, (_, idx) => low + idx);
+    self.postMessage({
+        type: 'worker_visual_update',
+        data: {
+            workerId: state.workerId,
+            indices: partitionIndices,
+            array: [...arr],
+            stats: {
+                operation: 'partition',
+                metrics: { ...state.metrics },
+                activeIndices: partitionIndices,
+                focusRegion: { min: low, max: high }
+            }
+        }
+    });
     
     for (let j = low; j < high; j++) {
         // Compare current element with pivot and highlight
         updateActiveIndices([j, high]);
         
+        // Send more frequent visualization updates during partitioning
+        if (j % 2 === 0 || (j - low) < 5 || (high - j) < 5) { // More updates at start and end
+            self.postMessage({
+                type: 'worker_visual_update',
+                data: {
+                    workerId: state.workerId,
+                    indices: [j, high, i+1],
+                    array: [...arr],
+                    stats: {
+                        operation: 'partition',
+                        metrics: { ...state.metrics },
+                        activeIndices: [j, high, i+1],
+                        focusRegion: { min: low, max: high }
+                    }
+                }
+            });
+        }
+        
         if (await compare(arr[j], pivot, j, high) <= 0) {
             i++;
             // Swap and highlight
             updateActiveIndices([i, j]);
+            
+            // Send explicit swap visualization BEFORE the actual swap
+            self.postMessage({
+                type: 'worker_visual_update',
+                data: {
+                    workerId: state.workerId,
+                    indices: [i, j, high],
+                    array: [...arr],
+                    stats: {
+                        operation: 'swap',
+                        metrics: { ...state.metrics },
+                        activeIndices: [i, j, high],
+                        focusRegion: { min: low, max: high }
+                    }
+                }
+            });
+            
             await swap(arr, i, j);
+            
+            // Send another update AFTER the swap
+            self.postMessage({
+                type: 'worker_visual_update',
+                data: {
+                    workerId: state.workerId,
+                    indices: [i, j, high],
+                    array: [...arr],
+                    stats: {
+                        operation: 'swap',
+                        metrics: { ...state.metrics },
+                        activeIndices: [i, j, high],
+                        focusRegion: { min: low, max: high }
+                    }
+                }
+            });
         }
     }
     
+    // Highlight final pivot position
+    updateActiveIndices([i+1, high]);
+    
+    // Send notification about final pivot swap
+    self.postMessage({
+        type: 'worker_visual_update',
+        data: {
+            workerId: state.workerId,
+            indices: [i+1, high],
+            array: [...arr],
+            stats: {
+                operation: 'pivot-placement',
+                metrics: { ...state.metrics },
+                activeIndices: [i+1, high],
+                focusRegion: { min: low, max: high }
+            }
+        }
+    });
+    
     // Swap the pivot element
     await swap(arr, i + 1, high);
+    
+    // Send final partition state
+    self.postMessage({
+        type: 'worker_visual_update',
+        data: {
+            workerId: state.workerId,
+            indices: [i+1],
+            array: [...arr],
+            stats: {
+                operation: 'partition-complete',
+                metrics: { ...state.metrics },
+                activeIndices: [i+1],
+                focusRegion: { min: low, max: high }
+            }
+        }
+    });
+    
     return i + 1;
 }
 

@@ -1037,9 +1037,37 @@ class BarRenderer {
                         operationIndicator = 'M';
                         operationColor = '#81C784'; // Light green
                         break;
+                    case 'merge-comparison':
+                        operationIndicator = 'MC';
+                        operationColor = '#4DB6AC'; // Teal
+                        break;
+                    case 'merge-place':
+                        operationIndicator = 'MP';
+                        operationColor = '#26A69A'; // Deeper teal
+                        break;
+                    case 'merge-complete':
+                        operationIndicator = 'OK';
+                        operationColor = '#00BFA5'; // Green teal
+                        break;
+                    case 'split':
+                        operationIndicator = 'SP';
+                        operationColor = '#AB47BC'; // Light purple
+                        break;
                     case 'partition':
                         operationIndicator = 'P';
                         operationColor = '#BA68C8'; // Purple
+                        break;
+                    case 'pivot':
+                        operationIndicator = 'PV';
+                        operationColor = '#FF5252'; // Red
+                        break;
+                    case 'pivot-placement':
+                        operationIndicator = 'PP';
+                        operationColor = '#FF9800'; // Orange
+                        break;
+                    case 'partition-complete':
+                        operationIndicator = 'PC';
+                        operationColor = '#4CAF50'; // Green
                         break;
                     default:
                         operationIndicator = '•';
