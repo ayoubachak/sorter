@@ -67,6 +67,21 @@
                         <option value="counting">Counting Sort</option>
                         <option value="tim">Tim Sort</option>
                     </select>
+                    
+                    <div class="col-span-3 mb-2 bg-indigo-100 p-2 rounded-lg flex items-center gap-2">
+                        <input type="checkbox" id="multiThreadedCheckbox" class="form-checkbox h-4 w-4 text-indigo-600">
+                        <label for="multiThreadedCheckbox" class="text-sm text-gray-700">Multi-threaded</label>
+                        <div class="ml-auto flex items-center gap-1">
+                            <label for="threadCount" class="text-sm text-gray-700">Threads:</label>
+                            <select id="threadCount" class="text-sm bg-white text-gray-800 py-0 px-1 rounded border border-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500" disabled>
+                                <option value="2">2</option>
+                                <option value="4" selected>4</option>
+                                <option value="8">8</option>
+                                <option value="16">16</option>
+                            </select>
+                        </div>
+                    </div>
+                    
                     <button id="startSortBtn" 
                         class="bg-green-500 hover:bg-green-600 text-white py-1 px-2 rounded-lg transition-colors">
                         Start

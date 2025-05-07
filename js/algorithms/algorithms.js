@@ -16,6 +16,7 @@ const ALGORITHM_INFO = {
         },
         spaceComplexity: 'O(1)',
         stable: true,
+        supportsMultiThreading: false,
         steps: [
             'Start at the beginning of the array',
             'Compare adjacent elements, swapping them if they are in the wrong order',
@@ -37,6 +38,7 @@ const ALGORITHM_INFO = {
         },
         spaceComplexity: 'O(1)',
         stable: false,
+        supportsMultiThreading: false,
         steps: [
             'Find the minimum value in the list',
             'Swap it with the value in the first position',
@@ -57,6 +59,7 @@ const ALGORITHM_INFO = {
         },
         spaceComplexity: 'O(1)',
         stable: true,
+        supportsMultiThreading: false,
         steps: [
             'Start with the second element',
             'Compare it with the elements before it and insert it in the correct position',
@@ -76,6 +79,8 @@ const ALGORITHM_INFO = {
         },
         spaceComplexity: 'O(n)',
         stable: true,
+        supportsMultiThreading: true,
+        parallelizationStrategy: 'Excellent for multi-threading by dividing the array into independent chunks that can be sorted in parallel, then merged.',
         steps: [
             'Divide the unsorted list into n sublists, each containing one element (a list of one element is considered sorted)',
             'Repeatedly merge sublists to produce new sorted sublists until there is only one sublist remaining'
@@ -94,6 +99,8 @@ const ALGORITHM_INFO = {
         },
         spaceComplexity: 'O(log n)',
         stable: false,
+        supportsMultiThreading: true,
+        parallelizationStrategy: 'Can be parallelized by partitioning the array and processing independent sections concurrently.',
         steps: [
             'Choose a pivot element from the array',
             'Partition the array around the pivot (elements less than the pivot go to the left, greater than go to the right)',
@@ -113,6 +120,7 @@ const ALGORITHM_INFO = {
         },
         spaceComplexity: 'O(1)',
         stable: false,
+        supportsMultiThreading: false,
         steps: [
             'Build a max heap from the input data',
             'Swap the first element (maximum) with the last element',
@@ -133,6 +141,7 @@ const ALGORITHM_INFO = {
         },
         spaceComplexity: 'O(1)',
         stable: false,
+        supportsMultiThreading: false,
         steps: [
             'Define a sequence of gaps',
             'Sort elements that are the gap distance apart using insertion sort',
@@ -154,6 +163,8 @@ const ALGORITHM_INFO = {
         },
         spaceComplexity: 'O(n+k)',
         stable: true,
+        supportsMultiThreading: true,
+        parallelizationStrategy: 'Can be parallelized by dividing the array into chunks, sorting each chunk independently, then merging.',
         steps: [
             'Find the maximum number to know the number of digits',
             'For each digit position, create 10 buckets (for digits 0-9)',
@@ -176,6 +187,7 @@ const ALGORITHM_INFO = {
         },
         spaceComplexity: 'O(n+k)',
         stable: true,
+        supportsMultiThreading: false,
         steps: [
             'Find the range of input values',
             'Create a counting array of size equal to the range',
@@ -198,6 +210,8 @@ const ALGORITHM_INFO = {
         },
         spaceComplexity: 'O(n)',
         stable: true,
+        supportsMultiThreading: true,
+        parallelizationStrategy: 'Supports multi-threading by sorting individual runs in parallel before merging them.',
         steps: [
             'Divide the array into small runs (typically 32 or 64 elements)',
             'Sort each run using insertion sort',
@@ -211,19 +225,27 @@ function getAlgorithmInfo(algorithm) {
     return ALGORITHM_INFO[algorithm] || null;
 }
 
+function supportsMultiThreading(algorithm) {
+    const info = ALGORITHM_INFO[algorithm];
+    return info && info.supportsMultiThreading === true;
+}
+
 if (typeof self !== 'undefined' && typeof window === 'undefined') {
     self.ALGORITHM_INFO = ALGORITHM_INFO;
     self.getAlgorithmInfo = getAlgorithmInfo;
+    self.supportsMultiThreading = supportsMultiThreading;
 }
 
 if (typeof window !== 'undefined') {
     window.ALGORITHM_INFO = ALGORITHM_INFO;
     window.getAlgorithmInfo = getAlgorithmInfo;
+    window.supportsMultiThreading = supportsMultiThreading;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         ALGORITHM_INFO,
-        getAlgorithmInfo
+        getAlgorithmInfo,
+        supportsMultiThreading
     };
 } 

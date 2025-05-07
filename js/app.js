@@ -49,6 +49,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const spaceComplexityEl = document.getElementById('spaceComplexity');
     const currentOperationEl = document.getElementById('currentOperation');
     
+    const multiThreadedCheckbox = document.getElementById('multiThreadedCheckbox');
+    const threadCountSelect = document.getElementById('threadCount');
+    
     let currentViewMode = 'bars';
     let isFirstSort = true;
     
@@ -64,7 +67,10 @@ document.addEventListener('DOMContentLoaded', () => {
         
         setupEventListeners();
         
-        updateAlgorithmInfo(algorithmSelect.value);
+        // Initialize algorithm info and multi-threading UI
+        const initialAlgorithm = algorithmSelect.value;
+        updateAlgorithmInfo(initialAlgorithm);
+        updateMultiThreadingUI(initialAlgorithm);
         
         updateSoundToggleUI(sortingEngine.isSoundEnabled());
     }
@@ -103,8 +109,14 @@ document.addEventListener('DOMContentLoaded', () => {
             sortingEngine.setAnimationSpeed(newSpeed);
         });
         
+        multiThreadedCheckbox.addEventListener('change', () => {
+            threadCountSelect.disabled = !multiThreadedCheckbox.checked;
+            updateAlgorithmInfo(algorithmSelect.value);
+        });
+        
         algorithmSelect.addEventListener('change', () => {
             updateAlgorithmInfo(algorithmSelect.value);
+            updateMultiThreadingUI(algorithmSelect.value);
         });
         
         generateArrayBtn.addEventListener('click', generateNewArray);
@@ -136,7 +148,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function startSorting() {
         const algorithm = algorithmSelect.value;
-        sortingEngine.startSorting(algorithm, false);
+        const useMultiThreading = multiThreadedCheckbox.checked && isAlgorithmMultiThreadable(algorithm);
+        const threadCount = useMultiThreading ? parseInt(threadCountSelect.value) : 1;
+        
+        sortingEngine.startSorting(algorithm, false, useMultiThreading, threadCount);
         isFirstSort = false;
         updateUIState();
     }
@@ -169,11 +184,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const algorithm = algorithmSelect.value;
             console.log('Starting sort in step mode');
             
+            // Multi-threading is not compatible with step mode
+            const useMultiThreading = false;
+            const threadCount = 1;
+            
             // Temporarily disable step button until step completes
             updateStepButtonState(false);
             
             // Start the sort in step mode
-            sortingEngine.startSorting(algorithm, true);
+            sortingEngine.startSorting(algorithm, true, useMultiThreading, threadCount);
             isFirstSort = false;
             
             // Execute the first step right away
@@ -298,6 +317,9 @@ document.addEventListener('DOMContentLoaded', () => {
             avgCaseEl.textContent = algorithmInfo.timeComplexity.average;
             worstCaseEl.textContent = algorithmInfo.timeComplexity.worst;
             spaceComplexityEl.textContent = algorithmInfo.spaceComplexity;
+            
+            // Update multi-threading UI based on the selected algorithm
+            updateMultiThreadingUI(algorithmName);
         }
     }
     
@@ -355,6 +377,32 @@ document.addEventListener('DOMContentLoaded', () => {
             soundToggleBtn.classList.remove('bg-indigo-700');
             soundToggleBtn.classList.add('bg-gray-600');
         }
+    }
+    
+    function updateMultiThreadingUI(algorithmName) {
+        const isSupported = window.supportsMultiThreading(algorithmName);
+        
+        // Enable/disable multi-threading checkbox based on algorithm support
+        if (!isSupported) {
+            multiThreadedCheckbox.checked = false;
+            multiThreadedCheckbox.disabled = true;
+            threadCountSelect.disabled = true;
+        } else {
+            multiThreadedCheckbox.disabled = false;
+            threadCountSelect.disabled = !multiThreadedCheckbox.checked;
+        }
+        
+        // Show message about multi-threading support
+        const algorithmInfo = window.ALGORITHM_INFO[algorithmName];
+        const message = isSupported ? 
+            `This algorithm supports multi-threading: ${algorithmInfo.parallelizationStrategy || ''}` : 
+            `This algorithm doesn't benefit from multi-threading.`;
+        
+        currentOperationEl.textContent = message;
+    }
+    
+    function isAlgorithmMultiThreadable(algorithmName) {
+        return window.supportsMultiThreading(algorithmName);
     }
     
     init();

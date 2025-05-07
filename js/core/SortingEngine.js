@@ -23,6 +23,9 @@ class SortingEngine {
         
         this.currentAlgorithm = null;
         this.worker = null;
+        this.workers = []; // Array to hold multiple workers for multi-threading
+        this.useMultiThreading = false;
+        this.threadCount = 1;
         this.animationSpeed = 50; // 1-100
         this.soundManager = new SoundManager(); // Initialize the sound manager
         this.callbacks = {
@@ -106,8 +109,10 @@ class SortingEngine {
      * Start the sorting process with the selected algorithm
      * @param {string} algorithmName - Name of the algorithm to use
      * @param {boolean} startInStepMode - Whether to start in step mode
+     * @param {boolean} useMultiThreading - Whether to use multi-threading
+     * @param {number} threadCount - Number of worker threads to use
      */
-    startSorting(algorithmName, startInStepMode = false) {
+    startSorting(algorithmName, startInStepMode = false, useMultiThreading = false, threadCount = 1) {
         if (this.state.status === 'running') {
             return; // Already running
         }
@@ -118,13 +123,32 @@ class SortingEngine {
         }
         
         this.currentAlgorithm = algorithmName;
+        this.useMultiThreading = useMultiThreading;
+        this.threadCount = Math.max(1, threadCount);
+        
+        // Multi-threading is not compatible with step mode
+        if (startInStepMode) {
+            this.useMultiThreading = false;
+            this.threadCount = 1;
+        }
         
         // Set appropriate status based on starting mode
         this.state.status = startInStepMode ? 'stepping' : 'running';
         this.metrics.startTime = performance.now();
         
-        // Start the worker
-        this.initializeWorker(algorithmName, startInStepMode);
+        // Notify about multi-threading if enabled
+        if (this.useMultiThreading && this.callbacks.onOperationUpdate) {
+            this.callbacks.onOperationUpdate('multi-threading', {
+                description: `Using multi-threaded execution with ${this.threadCount} workers.`
+            });
+        }
+        
+        // Start the worker(s)
+        if (this.useMultiThreading) {
+            this.initializeMultiThreadedSorting(algorithmName);
+        } else {
+            this.initializeWorker(algorithmName, startInStepMode);
+        }
         
         // If starting in step mode, signal that we're waiting for a step
         if (startInStepMode) {
@@ -226,9 +250,148 @@ class SortingEngine {
                 algorithm: algorithmName,
                 array: this.array,
                 speed: this.animationSpeed,
-                stepMode: startInStepMode || this.state.status === 'stepping'
+                stepMode: startInStepMode || this.state.status === 'stepping',
+                useMultiThreading: false,
+                threadCount: 1
             }
         });
+    }
+    
+    /**
+     * Initialize multiple workers for multi-threaded sorting
+     * @param {string} algorithmName - Name of the algorithm to use
+     */
+    initializeMultiThreadedSorting(algorithmName) {
+        // Terminate any existing workers
+        this.terminateAllWorkers();
+        
+        try {
+            console.log('Starting multi-threaded sorting with', this.threadCount, 'threads');
+            
+            // Create the main coordinator worker
+            this.worker = new Worker('./js/algorithms/multiThreadedWorker.js');
+            
+            // Set up event listeners for worker messages (similar to single-threaded)
+            this.worker.onmessage = (event) => {
+                const { type, data } = event.data;
+                
+                switch (type) {
+                    case 'array_update':
+                        this.array = data.array;
+                        if (this.callbacks.onArrayUpdate) {
+                            this.callbacks.onArrayUpdate(this.array, data.indices);
+                        }
+                        break;
+                        
+                    case 'metrics_update':
+                        this.metrics.comparisons = data.comparisons;
+                        this.metrics.swaps = data.swaps;
+                        this.metrics.accesses = data.accesses;
+                        if (this.callbacks.onMetricsUpdate) {
+                            this.callbacks.onMetricsUpdate(this.metrics);
+                        }
+                        break;
+                        
+                    case 'operation_update':
+                        if (this.callbacks.onOperationUpdate) {
+                            this.callbacks.onOperationUpdate(data.operation, data.details);
+                        }
+                        
+                        // Play sounds based on operation type
+                        this.playSoundForOperation(data.operation, data.details);
+                        break;
+                        
+                    case 'sorting_complete':
+                        this.state.status = 'completed';
+                        this.metrics.endTime = performance.now();
+                        
+                        // Play completion sound
+                        this.soundManager.playSound('completed', { volume: 0.6 });
+                        
+                        if (this.callbacks.onSortingComplete) {
+                            this.callbacks.onSortingComplete(this.metrics);
+                        }
+                        break;
+                        
+                    case 'step_complete':
+                        console.log('Engine received step_complete from worker');
+                        this.state.stepPending = false;
+                        
+                        // Log when a step completes
+                        console.log('Step completed, state:', this.state.status);
+                        
+                        if (this.callbacks.onStepComplete) {
+                            this.callbacks.onStepComplete();
+                        }
+                        break;
+                        
+                    case 'awaiting_step':
+                        console.log('Engine received awaiting_step from worker');
+                        this.state.stepPending = false;
+                        break;
+                    
+                    case 'error':
+                        console.error('Worker error:', data.message);
+                        if (this.callbacks.onOperationUpdate) {
+                            this.callbacks.onOperationUpdate('error', {
+                                description: `Error in worker: ${data.message}`
+                            });
+                        }
+                        break;
+                }
+            };
+            
+            this.worker.onerror = (error) => {
+                console.error('Worker error:', error);
+                if (this.callbacks.onOperationUpdate) {
+                    this.callbacks.onOperationUpdate('error', {
+                        description: `Worker error: ${error.message}`
+                    });
+                }
+            };
+            
+            console.log('Initializing multi-threaded sorting with', this.threadCount, 'threads');
+            
+            // Start the coordinator worker
+            this.worker.postMessage({
+                type: 'start_multi_threaded_sorting',
+                data: {
+                    algorithm: algorithmName,
+                    array: [...this.array],
+                    speed: this.animationSpeed,
+                    threadCount: this.threadCount
+                }
+            });
+        } catch (error) {
+            console.error('Error initializing multi-threaded sorting:', error);
+            if (this.callbacks.onOperationUpdate) {
+                this.callbacks.onOperationUpdate('error', {
+                    description: `Failed to initialize multi-threaded sorting: ${error.message}`
+                });
+            }
+            
+            // Fall back to single-threaded mode
+            this.useMultiThreading = false;
+            this.initializeWorker(algorithmName);
+        }
+    }
+    
+    /**
+     * Terminate all active workers
+     */
+    terminateAllWorkers() {
+        if (this.worker) {
+            this.worker.terminate();
+            this.worker = null;
+        }
+        
+        this.workers.forEach(worker => {
+            if (worker) {
+                worker.terminate();
+            }
+        });
+        
+        this.workers = [];
     }
     
     /**
@@ -348,10 +511,8 @@ class SortingEngine {
         this.state.status = 'idle';
         this.state.stepPending = false;
         
-        if (this.worker) {
-            this.worker.terminate();
-            this.worker = null;
-        }
+        // Terminate all workers
+        this.terminateAllWorkers();
         
         // Reset the array to its original state
         this.array = [...this.originalArray];
