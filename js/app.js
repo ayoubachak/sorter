@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function startSorting() {
         const algorithm = algorithmSelect.value;
-        sortingEngine.startSorting(algorithm);
+        sortingEngine.startSorting(algorithm, false);
         isFirstSort = false;
         updateUIState();
     }
@@ -170,15 +170,19 @@ document.addEventListener('DOMContentLoaded', () => {
         // First start case
         if (status === 'idle') {
             const algorithm = algorithmSelect.value;
-            sortingEngine.startSorting(algorithm);
+            console.log('Starting sort in step mode');
+            
+            // Temporarily disable step button until step completes
+            updateStepButtonState(false);
+            
+            // Start the sort in step mode
+            sortingEngine.startSorting(algorithm, true);
             isFirstSort = false;
             
-            // Set a slight delay before calling step to ensure the algorithm has started
+            // Execute the first step right away
             setTimeout(() => {
                 sortingEngine.executeStep();
                 updateUIState();
-                // Temporarily disable step button until step completes
-                updateStepButtonState(false);
             }, 100);
             
             return;

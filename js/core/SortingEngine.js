@@ -105,8 +105,9 @@ class SortingEngine {
     /**
      * Start the sorting process with the selected algorithm
      * @param {string} algorithmName - Name of the algorithm to use
+     * @param {boolean} startInStepMode - Whether to start in step mode
      */
-    startSorting(algorithmName) {
+    startSorting(algorithmName, startInStepMode = false) {
         if (this.state.status === 'running') {
             return; // Already running
         }
@@ -117,18 +118,30 @@ class SortingEngine {
         }
         
         this.currentAlgorithm = algorithmName;
-        this.state.status = 'running';
+        
+        // Set appropriate status based on starting mode
+        this.state.status = startInStepMode ? 'stepping' : 'running';
         this.metrics.startTime = performance.now();
         
         // Start the worker
-        this.initializeWorker(algorithmName);
+        this.initializeWorker(algorithmName, startInStepMode);
+        
+        // If starting in step mode, signal that we're waiting for a step
+        if (startInStepMode) {
+            if (this.callbacks.onOperationUpdate) {
+                this.callbacks.onOperationUpdate('status', {
+                    description: 'Ready for step-by-step execution. Click Step to begin.'
+                });
+            }
+        }
     }
     
     /**
      * Initialize a Web Worker for the sorting algorithm
      * @param {string} algorithmName - Name of the algorithm to use
+     * @param {boolean} startInStepMode - Whether to start in step mode
      */
-    initializeWorker(algorithmName) {
+    initializeWorker(algorithmName, startInStepMode = false) {
         // Terminate any existing worker
         if (this.worker) {
             this.worker.terminate();
@@ -198,6 +211,14 @@ class SortingEngine {
             }
         };
         
+        // If we're starting in step mode, make sure to set the state
+        if (startInStepMode) {
+            this.state.status = 'stepping';
+            this.state.stepPending = false;
+        }
+        
+        console.log('Initializing worker with step mode:', startInStepMode || this.state.status === 'stepping');
+        
         // Start the sorting process in the worker
         this.worker.postMessage({
             type: 'start_sorting',
@@ -205,7 +226,7 @@ class SortingEngine {
                 algorithm: algorithmName,
                 array: this.array,
                 speed: this.animationSpeed,
-                stepMode: this.state.status === 'stepping'
+                stepMode: startInStepMode || this.state.status === 'stepping'
             }
         });
     }
