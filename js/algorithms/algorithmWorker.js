@@ -6,11 +6,11 @@
 // State variables
 let array = [];
 let originalArray = [];
-let sortingState = {
-    inProgress: false,
-    paused: false,
-    stepMode: false,
-    stepReady: false
+let state = {
+    status: 'idle', // 'idle', 'running', 'paused', 'stepping', 'completed'
+    operationCount: 0,
+    maxOperationsPerStep: 1,
+    awaitingStep: false
 };
 
 let metrics = {
@@ -84,6 +84,39 @@ function sendSortingComplete() {
 }
 
 /**
+ * Send a step complete message to the main thread
+ */
+function sendStepComplete() {
+    // First notify the main thread that the step is complete
+    self.postMessage({
+        type: 'step_complete'
+    });
+    
+    console.log('Worker: Sent step_complete message');
+    
+    // Then set awaiting step - we're now ready for next step command
+    state.awaitingStep = true;
+    state.operationCount = 0;
+    
+    // Add a clear message that step is complete
+    sendOperationUpdate('waiting', { 
+        description: 'Step completed. Click Step to continue.'
+    });
+    
+    // Also notify main thread we're waiting for next step
+    sendAwaitingStep();
+}
+
+/**
+ * Send a message indicating that the worker is awaiting the next step
+ */
+function sendAwaitingStep() {
+    self.postMessage({
+        type: 'awaiting_step'
+    });
+}
+
+/**
  * Wrapper for array access that tracks metrics
  * @param {Array<number>} arr - The array to access
  * @param {number} index - The index to access
@@ -92,6 +125,18 @@ function sendSortingComplete() {
 function arrayAccess(arr, index) {
     metrics.accesses++;
     sendMetricsUpdate();
+    
+    // In step mode, we track the operation count
+    if (state.status === 'stepping') {
+        state.operationCount++;
+        
+        // If we've reached the limit, mark the step as complete
+        if (state.operationCount >= state.maxOperationsPerStep) {
+            state.awaitingStep = true;
+            sendStepComplete();
+        }
+    }
+    
     return arr[index];
 }
 
@@ -104,6 +149,20 @@ function arrayAccess(arr, index) {
 function compare(a, b) {
     metrics.comparisons++;
     sendMetricsUpdate();
+    
+    // Check current state - not previous cached state
+    const currentState = state.status;
+    
+    // In step mode, we track the operation count
+    if (currentState === 'stepping') {
+        state.operationCount++;
+        
+        // If we've reached the limit, mark the step as complete
+        if (state.operationCount >= state.maxOperationsPerStep) {
+            console.log('Worker: Compare operation reaching step limit, completing step');
+            sendStepComplete();
+        }
+    }
     
     if (a < b) return -1;
     if (a > b) return 1;
@@ -126,10 +185,23 @@ async function swap(arr, i, j) {
     // Notify main thread about the swap
     sendArrayUpdate(arr, [i, j]);
     
-    // Wait for visualization if not in step mode
-    if (!sortingState.stepMode) {
+    // Wait based on current state - check state again in case it changed
+    const currentState = state.status;
+    
+    if (currentState === 'running') {
         await waitIfPaused();
         await delay(delayTime);
+    } else if (currentState === 'stepping') {
+        state.operationCount++;
+        
+        // If we've reached the limit, mark the step as complete
+        if (state.operationCount >= state.maxOperationsPerStep) {
+            console.log('Worker: Swap operation reaching step limit, completing step');
+            sendStepComplete();
+            
+            // Wait for next step to be triggered or state to change
+            await waitForStep();
+        }
     }
     
     // Perform the actual swap
@@ -145,9 +217,19 @@ async function swap(arr, i, j) {
  */
 function waitIfPaused() {
     return new Promise(resolve => {
-        if (sortingState.paused) {
+        if (state.status === 'paused') {
+            sendOperationUpdate('waiting', { 
+                description: 'Sorting paused. Waiting for resume or step command.'
+            });
+            
             const checkPaused = () => {
-                if (sortingState.paused) {
+                // If we switched to step mode, don't wait for pause to be lifted
+                if (state.status === 'stepping') {
+                    resolve();
+                    return;
+                }
+                
+                if (state.status === 'paused') {
                     setTimeout(checkPaused, 100);
                 } else {
                     resolve();
@@ -161,27 +243,57 @@ function waitIfPaused() {
 }
 
 /**
- * Wait for step execution in step mode
+ * Wait for step execution when in step mode
  * @returns {Promise} - Promise that resolves when a step is executed
  */
 function waitForStep() {
     return new Promise(resolve => {
-        if (sortingState.stepMode && !sortingState.stepReady) {
-            const checkStep = () => {
-                if (!sortingState.stepReady) {
-                    setTimeout(checkStep, 100);
-                } else {
-                    sortingState.stepReady = false;
-                    resolve();
-                }
-            };
-            checkStep();
-        } else {
-            if (sortingState.stepMode) {
-                sortingState.stepReady = false;
-            }
+        // If not in stepping mode, resolve immediately
+        if (state.status !== 'stepping') {
             resolve();
+            return;
         }
+        
+        // If not waiting for a step, no need to wait
+        if (!state.awaitingStep) {
+            resolve();
+            return;
+        }
+        
+        // We're in step mode and awaiting the next step
+        // Tell the main thread that we're waiting
+        sendAwaitingStep();
+        
+        // Log that we're waiting
+        sendOperationUpdate('waiting', {
+            description: 'Waiting for next step command...'
+        });
+        
+        // Debug info
+        console.log('Waiting for step, status:', state.status, 'awaitingStep:', state.awaitingStep);
+        
+        // Use reference to interval for reliable cleanup
+        let intervalId = null;
+        
+        const checkStep = () => {
+            // Check if our state has changed
+            if (state.status !== 'stepping') {
+                console.log('Exiting step wait - status changed');
+                clearInterval(intervalId);
+                resolve();
+                return;
+            }
+            
+            // Check if step was triggered
+            if (!state.awaitingStep) {
+                console.log('Exiting step wait - step triggered');
+                clearInterval(intervalId);
+                resolve();
+                return;
+            }
+        };
+        
+        intervalId = setInterval(checkStep, 50);
     });
 }
 
@@ -200,10 +312,9 @@ async function startSorting(algorithm, inputArray, speed, stepMode = false) {
     animationSpeed = speed;
     delayTime = Math.max(10, 1000 / (speed * speed * 0.01));
     
-    sortingState.inProgress = true;
-    sortingState.paused = false;
-    sortingState.stepMode = stepMode;
-    sortingState.stepReady = false;
+    state.status = stepMode ? 'stepping' : 'running';
+    state.operationCount = 0;
+    state.awaitingStep = stepMode;
     
     metrics = {
         comparisons: 0,
@@ -213,6 +324,10 @@ async function startSorting(algorithm, inputArray, speed, stepMode = false) {
     
     sendArrayUpdate(array);
     sendMetricsUpdate();
+    
+    if (stepMode) {
+        sendAwaitingStep();
+    }
     
     try {
         // Select the correct algorithm
@@ -249,8 +364,7 @@ async function startSorting(algorithm, inputArray, speed, stepMode = false) {
         sendArrayUpdate(array, Array.from({ length: array.length }, (_, i) => i));
         
         // Send completion notification
-        sortingState.inProgress = false;
-        sortingState.completed = true;
+        state.status = 'completed';
         sendSortingComplete();
         
     } catch (error) {
@@ -274,17 +388,23 @@ async function bubbleSort(arr) {
     const n = arr.length;
     
     for (let i = 0; i < n; i++) {
+        // Notify about the current iteration
+        sendOperationUpdate('iteration', { 
+            iteration: i + 1,
+            description: `Starting iteration ${i + 1} of ${n}`
+        });
+        
         let swapped = false;
         
         for (let j = 0; j < n - i - 1; j++) {
-            // Wait if in step mode
-            if (sortingState.stepMode) {
+            // Handle stepping or pausing
+            if (state.status === 'stepping') {
                 await waitForStep();
+            } else if (state.status === 'paused') {
+                await waitIfPaused();
             }
             
-            // Wait if paused
-            await waitIfPaused();
-            
+            // Process each comparison
             sendOperationUpdate('comparison', { 
                 indices: [j, j + 1],
                 values: [arr[j], arr[j + 1]],
@@ -316,16 +436,21 @@ async function selectionSort(arr) {
     const n = arr.length;
     
     for (let i = 0; i < n - 1; i++) {
+        // Notify about the current iteration
+        sendOperationUpdate('iteration', { 
+            iteration: i + 1,
+            description: `Finding the minimum element in the unsorted portion (iteration ${i + 1} of ${n - 1})`
+        });
+        
         let minIdx = i;
         
         for (let j = i + 1; j < n; j++) {
-            // Wait if in step mode
-            if (sortingState.stepMode) {
+            // Handle stepping or pausing
+            if (state.status === 'stepping') {
                 await waitForStep();
+            } else if (state.status === 'paused') {
+                await waitIfPaused();
             }
-            
-            // Wait if paused
-            await waitIfPaused();
             
             sendOperationUpdate('comparison', { 
                 indices: [minIdx, j],
@@ -340,6 +465,17 @@ async function selectionSort(arr) {
         
         // Swap the minimum element with the first element
         if (minIdx !== i) {
+            // In step mode, wait for the next step before swapping
+            if (state.status === 'stepping') {
+                await waitForStep();
+            }
+            
+            sendOperationUpdate('swap', { 
+                indices: [i, minIdx],
+                values: [arr[i], arr[minIdx]],
+                description: `Swapping minimum element (${arr[minIdx]}) with element at position ${i} (${arr[i]})`
+            });
+            
             await swap(arr, i, minIdx);
         }
     }
@@ -357,8 +493,12 @@ async function insertionSort(arr) {
     const n = arr.length;
     
     for (let i = 1; i < n; i++) {
+        // Handle stepping before getting key
+        if (state.status === 'stepping') {
+            await waitForStep();
+        }
+        
         const key = arrayAccess(arr, i);
-        let j = i - 1;
         
         sendOperationUpdate('key-selection', { 
             index: i,
@@ -366,19 +506,19 @@ async function insertionSort(arr) {
             description: `Selected key at position ${i} with value ${key}`
         });
         
+        let j = i - 1;
         while (j >= 0) {
-            // Wait if in step mode
-            if (sortingState.stepMode) {
+            // Handle stepping or pausing
+            if (state.status === 'stepping') {
                 await waitForStep();
+            } else if (state.status === 'paused') {
+                await waitIfPaused();
             }
-            
-            // Wait if paused
-            await waitIfPaused();
             
             sendOperationUpdate('comparison', { 
                 indices: [j, j + 1],
                 values: [arr[j], key],
-                description: `Comparing key with element at position ${j}`
+                description: `Comparing key ${key} with element ${arr[j]} at position ${j}`
             });
             
             if (compare(arr[j], key) <= 0) {
@@ -413,11 +553,6 @@ async function mergeSort(arr, left, right) {
     });
     
     const mid = Math.floor((left + right) / 2);
-    
-    // Wait if in step mode
-    if (sortingState.stepMode) {
-        await waitForStep();
-    }
     
     // Sort first and second halves
     await mergeSort(arr, left, mid);
@@ -458,13 +593,12 @@ async function merge(arr, left, mid, right) {
     let i = 0, j = 0, k = left;
     
     while (i < n1 && j < n2) {
-        // Wait if in step mode
-        if (sortingState.stepMode) {
+        // Wait if paused or if in step mode
+        if (state.status === 'stepping') {
             await waitForStep();
+        } else {
+            await waitIfPaused();
         }
-        
-        // Wait if paused
-        await waitIfPaused();
         
         sendOperationUpdate('comparison', { 
             indices: [left + i, mid + 1 + j],
@@ -487,10 +621,12 @@ async function merge(arr, left, mid, right) {
     
     // Copy the remaining elements of L[]
     while (i < n1) {
-        if (sortingState.stepMode) {
+        // Wait if paused or if in step mode
+        if (state.status === 'stepping') {
             await waitForStep();
+        } else {
+            await waitIfPaused();
         }
-        await waitIfPaused();
         
         arr[k] = L[i];
         sendArrayUpdate(arr, [k]);
@@ -501,10 +637,12 @@ async function merge(arr, left, mid, right) {
     
     // Copy the remaining elements of R[]
     while (j < n2) {
-        if (sortingState.stepMode) {
+        // Wait if paused or if in step mode
+        if (state.status === 'stepping') {
             await waitForStep();
+        } else {
+            await waitIfPaused();
         }
-        await waitIfPaused();
         
         arr[k] = R[j];
         sendArrayUpdate(arr, [k]);
@@ -522,14 +660,6 @@ async function quickSort(arr, low, high) {
             high,
             description: `Partitioning array from index ${low} to ${high}`
         });
-        
-        // Wait if in step mode
-        if (sortingState.stepMode) {
-            await waitForStep();
-        }
-        
-        // Wait if paused
-        await waitIfPaused();
         
         // Partition the array and get the pivot index
         const pivotIndex = await partition(arr, low, high);
@@ -554,13 +684,12 @@ async function partition(arr, low, high) {
     let i = low - 1; // Index of smaller element
     
     for (let j = low; j < high; j++) {
-        // Wait if in step mode
-        if (sortingState.stepMode) {
+        // Wait if paused or if in step mode
+        if (state.status === 'stepping') {
             await waitForStep();
+        } else {
+            await waitIfPaused();
         }
-        
-        // Wait if paused
-        await waitIfPaused();
         
         sendOperationUpdate('comparison', { 
             indices: [j, high],
@@ -591,16 +720,21 @@ async function heapSort(arr) {
     const n = arr.length;
     
     // Build heap (rearrange array)
+    sendOperationUpdate('build-heap', { 
+        description: 'Building max heap from array'
+    });
+    
     for (let i = Math.floor(n / 2) - 1; i >= 0; i--) {
         await heapify(arr, n, i);
     }
     
     // Extract elements from heap one by one
     for (let i = n - 1; i > 0; i--) {
-        // Wait if in step mode
-        if (sortingState.stepMode) {
-            await waitForStep();
-        }
+        sendOperationUpdate('extract-max', { 
+            index: i,
+            value: arr[0],
+            description: `Extracting max element (${arr[0]}) and placing at position ${i}`
+        });
         
         // Wait if paused
         await waitIfPaused();
@@ -623,6 +757,11 @@ async function heapify(arr, n, i) {
     
     // If left child is larger than root
     if (left < n) {
+        // Wait if in step mode
+        if (state.status === 'stepping') {
+            await waitForStep();
+        }
+        
         sendOperationUpdate('comparison', { 
             indices: [largest, left],
             values: [arr[largest], arr[left]],
@@ -636,6 +775,11 @@ async function heapify(arr, n, i) {
     
     // If right child is larger than largest so far
     if (right < n) {
+        // Wait if in step mode
+        if (state.status === 'stepping') {
+            await waitForStep();
+        }
+        
         sendOperationUpdate('comparison', { 
             indices: [largest, right],
             values: [arr[largest], arr[right]],
@@ -671,29 +815,77 @@ self.addEventListener('message', async (event) => {
             break;
             
         case 'pause_sorting':
-            sortingState.paused = true;
+            state.status = 'paused';
             break;
             
         case 'resume_sorting':
-            sortingState.paused = false;
+            // When resuming, clear the awaiting step flag
+            state.status = 'running';
+            state.awaitingStep = false;
+            
+            // Send explicit notification that we're resuming
+            const wasInStepMode = data && data.wasInStepMode;
+            sendOperationUpdate('status', {
+                description: wasInStepMode ? 
+                    'Resumed continuous execution from step mode.' : 
+                    'Resumed from pause.'
+            });
             break;
             
         case 'stop_sorting':
-            sortingState.inProgress = false;
-            sortingState.paused = false;
+            state.status = 'idle';
+            state.awaitingStep = false;
             break;
             
         case 'enable_step_mode':
-            sortingState.stepMode = true;
+            // Remember if we were previously paused
+            const wasPaused = state.status === 'paused';
+            
+            // Transition to stepping mode
+            state.status = 'stepping';
+            state.operationCount = 0;
+            state.awaitingStep = true;
+            
+            // Log the transition
+            console.log('Enabled step mode, awaiting step:', state.awaitingStep);
+            
+            // Notify main thread we're waiting for a step
+            sendAwaitingStep();
+            
+            // Send appropriate notification based on previous state
+            if (wasPaused) {
+                sendOperationUpdate('status', {
+                    description: 'Transitioned from paused to step mode. Click Step to advance one operation at a time.'
+                });
+            } else {
+                sendOperationUpdate('status', {
+                    description: 'Step mode enabled. Click Step to execute one operation at a time.'
+                });
+            }
             break;
             
         case 'execute_step':
-            sortingState.stepReady = true;
+            // Always honor the step command regardless of current state
+            state.status = 'stepping';  // Force stepping mode if not already in it
+            state.awaitingStep = false; // Allow execution to proceed
+            state.operationCount = 0;   // Reset operation count for the new step
+            
+            // Log the step execution
+            console.log('Worker received execute_step command, awaitingStep:', state.awaitingStep);
+            
+            // Send confirmation that we're executing the step
+            sendOperationUpdate('step', {
+                description: 'Executing next step...'
+            });
             break;
             
         case 'set_speed':
             animationSpeed = data.speed;
             delayTime = Math.max(10, 1000 / (animationSpeed * animationSpeed * 0.01));
+            break;
+            
+        case 'set_operations_per_step':
+            state.maxOperationsPerStep = data.count || 1;
             break;
     }
 }); 

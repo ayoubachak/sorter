@@ -50,7 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentOperationEl = document.getElementById('currentOperation');
     
     let currentViewMode = 'bars';
-    let stepMode = false;
+    let isFirstSort = true;
     
     function init() {
         const initialSize = parseInt(arraySizeSlider.value);
@@ -82,6 +82,11 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             onSortingComplete: () => {
                 sortingComplete();
+            },
+            onStepComplete: () => {
+                console.log('Step complete callback received');
+                updateStepButtonState(true);
+                updateUIState();
             }
         });
     }
@@ -123,62 +128,145 @@ document.addEventListener('DOMContentLoaded', () => {
                 button.classList.add('active');
             });
         });
-        
-        window.addEventListener('resize', () => {
-        });
     }
     
     function generateNewArray() {
         const size = parseInt(arraySizeSlider.value);
         sortingEngine.initialize(size);
+        isFirstSort = true;
+        updateUIState();
     }
     
     function startSorting() {
         const algorithm = algorithmSelect.value;
-        
-        startSortBtn.disabled = true;
-        pauseResumeBtn.disabled = false;
-        stopSortBtn.disabled = false;
-        generateArrayBtn.disabled = true;
-        algorithmSelect.disabled = true;
-        
-        stepMode = false;
-        
         sortingEngine.startSorting(algorithm);
+        isFirstSort = false;
+        updateUIState();
     }
     
     function togglePauseResume() {
-        if (sortingEngine.sortingState.paused) {
+        const status = sortingEngine.getStatus();
+        
+        if (status === 'paused') {
             sortingEngine.resumeSorting();
-            pauseResumeBtn.textContent = 'Pause';
-        } else {
+        } else if (status === 'stepping') {
+            sortingEngine.resumeSorting();
+        } else if (status === 'running') {
             sortingEngine.pauseSorting();
-            pauseResumeBtn.textContent = 'Resume';
         }
+        
+        updateUIState();
     }
     
     function stopSorting() {
         sortingEngine.stopSorting();
-        
-        startSortBtn.disabled = false;
-        pauseResumeBtn.disabled = true;
-        pauseResumeBtn.textContent = 'Pause';
-        stopSortBtn.disabled = true;
-        generateArrayBtn.disabled = false;
-        algorithmSelect.disabled = false;
+        isFirstSort = true;
+        updateUIState();
     }
     
     function executeStep() {
-        if (!sortingEngine.sortingState.inProgress) {
-            stepMode = true;
-            sortingEngine.enableStepMode();
+        const status = sortingEngine.getStatus();
+        
+        // First start case
+        if (status === 'idle') {
+            const algorithm = algorithmSelect.value;
+            sortingEngine.startSorting(algorithm);
+            isFirstSort = false;
             
-            if (!sortingEngine.sortingState.inProgress) {
-                startSorting();
-            }
+            // Set a slight delay before calling step to ensure the algorithm has started
+            setTimeout(() => {
+                sortingEngine.executeStep();
+                updateUIState();
+                // Temporarily disable step button until step completes
+                updateStepButtonState(false);
+            }, 100);
+            
+            return;
         }
         
-        sortingEngine.executeStep();
+        // Execute a step
+        const result = sortingEngine.executeStep();
+        
+        if (result) {
+            // If step execution was successful, update button state to disabled
+            updateStepButtonState(false);
+        }
+        
+        updateUIState();
+    }
+    
+    function updateStepButtonState(enabled) {
+        console.log('Updating step button state:', enabled);
+        
+        stepBtn.disabled = !enabled;
+        
+        if (enabled) {
+            stepBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-purple-700');
+            stepBtn.classList.add('bg-purple-500', 'hover:bg-purple-600');
+            stepBtn.textContent = 'Step';
+        } else {
+            stepBtn.classList.add('opacity-50', 'cursor-not-allowed', 'bg-purple-700');
+            stepBtn.classList.remove('bg-purple-500', 'hover:bg-purple-600');
+            stepBtn.textContent = 'Executing...';
+        }
+    }
+    
+    function updateUIState() {
+        const status = sortingEngine.getStatus();
+        const stepPending = sortingEngine.isStepPending();
+        
+        // Update button states based on current status
+        switch (status) {
+            case 'idle':
+                startSortBtn.disabled = false;
+                pauseResumeBtn.disabled = true;
+                stopSortBtn.disabled = true;
+                stepBtn.disabled = false;
+                generateArrayBtn.disabled = false;
+                algorithmSelect.disabled = false;
+                pauseResumeBtn.textContent = 'Pause';
+                break;
+                
+            case 'running':
+                startSortBtn.disabled = true;
+                pauseResumeBtn.disabled = false;
+                stopSortBtn.disabled = false;
+                stepBtn.disabled = false;
+                generateArrayBtn.disabled = true;
+                algorithmSelect.disabled = true;
+                pauseResumeBtn.textContent = 'Pause';
+                break;
+                
+            case 'paused':
+                startSortBtn.disabled = true;
+                pauseResumeBtn.disabled = false;
+                stopSortBtn.disabled = false;
+                stepBtn.disabled = false;
+                generateArrayBtn.disabled = true;
+                algorithmSelect.disabled = true;
+                pauseResumeBtn.textContent = 'Resume';
+                break;
+                
+            case 'stepping':
+                startSortBtn.disabled = true;
+                pauseResumeBtn.disabled = false;
+                stopSortBtn.disabled = false;
+                stepBtn.disabled = stepPending;
+                generateArrayBtn.disabled = true;
+                algorithmSelect.disabled = true;
+                pauseResumeBtn.textContent = 'Resume';
+                break;
+                
+            case 'completed':
+                startSortBtn.disabled = false;
+                pauseResumeBtn.disabled = true;
+                stopSortBtn.disabled = true;
+                stepBtn.disabled = false;
+                generateArrayBtn.disabled = false;
+                algorithmSelect.disabled = false;
+                pauseResumeBtn.textContent = 'Pause';
+                break;
+        }
     }
     
     function changeViewMode(mode) {
@@ -221,12 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     function sortingComplete() {
-        startSortBtn.disabled = false;
-        pauseResumeBtn.disabled = true;
-        pauseResumeBtn.textContent = 'Pause';
-        stopSortBtn.disabled = true;
-        generateArrayBtn.disabled = false;
-        algorithmSelect.disabled = false;
+        isFirstSort = true;
         
         const sortedIndices = Array.from({ length: sortingEngine.array.length }, (_, i) => i);
         visualizer.highlightElements(sortedIndices, 'sorted');
@@ -234,6 +317,8 @@ document.addEventListener('DOMContentLoaded', () => {
         currentOperationEl.textContent = 'Sorting completed!';
         
         visualizer.applyEffect('wave');
+        
+        updateUIState();
     }
     
     function toggleSound() {

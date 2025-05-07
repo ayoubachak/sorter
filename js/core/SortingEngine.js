@@ -6,11 +6,11 @@ class SortingEngine {
     constructor() {
         this.array = [];
         this.originalArray = [];
-        this.sortingState = {
-            inProgress: false,
-            paused: false,
-            completed: false,
-            stepMode: false
+        
+        // Simplified state model with clear states
+        this.state = {
+            status: 'idle', // 'idle', 'running', 'paused', 'stepping', 'completed'
+            stepPending: false
         };
         
         this.metrics = {
@@ -29,7 +29,8 @@ class SortingEngine {
             onArrayUpdate: null,
             onMetricsUpdate: null,
             onOperationUpdate: null,
-            onSortingComplete: null
+            onSortingComplete: null,
+            onStepComplete: null
         };
     }
     
@@ -40,9 +41,8 @@ class SortingEngine {
      */
     initialize(size, distribution = 'random') {
         this.resetMetrics();
-        this.sortingState.inProgress = false;
-        this.sortingState.paused = false;
-        this.sortingState.completed = false;
+        this.state.status = 'idle';
+        this.state.stepPending = false;
         
         this.array = this.generateArray(size, distribution);
         this.originalArray = [...this.array];
@@ -107,21 +107,17 @@ class SortingEngine {
      * @param {string} algorithmName - Name of the algorithm to use
      */
     startSorting(algorithmName) {
-        if (this.sortingState.inProgress && !this.sortingState.paused) {
-            return; // Already in progress
+        if (this.state.status === 'running') {
+            return; // Already running
         }
         
-        if (this.sortingState.completed) {
+        if (this.state.status === 'completed') {
             this.array = [...this.originalArray]; // Reset array
             this.resetMetrics();
         }
         
         this.currentAlgorithm = algorithmName;
-        this.sortingState.inProgress = true;
-        this.sortingState.paused = false;
-        this.sortingState.completed = false;
-        this.sortingState.stepMode = false;
-        
+        this.state.status = 'running';
         this.metrics.startTime = performance.now();
         
         // Start the worker
@@ -172,8 +168,7 @@ class SortingEngine {
                     break;
                     
                 case 'sorting_complete':
-                    this.sortingState.inProgress = false;
-                    this.sortingState.completed = true;
+                    this.state.status = 'completed';
                     this.metrics.endTime = performance.now();
                     
                     // Play completion sound
@@ -182,6 +177,23 @@ class SortingEngine {
                     if (this.callbacks.onSortingComplete) {
                         this.callbacks.onSortingComplete(this.metrics);
                     }
+                    break;
+                    
+                case 'step_complete':
+                    console.log('Engine received step_complete from worker');
+                    this.state.stepPending = false;
+                    
+                    // Log when a step completes
+                    console.log('Step completed, state:', this.state.status);
+                    
+                    if (this.callbacks.onStepComplete) {
+                        this.callbacks.onStepComplete();
+                    }
+                    break;
+                    
+                case 'awaiting_step':
+                    console.log('Engine received awaiting_step from worker');
+                    this.state.stepPending = false;
                     break;
             }
         };
@@ -193,7 +205,7 @@ class SortingEngine {
                 algorithm: algorithmName,
                 array: this.array,
                 speed: this.animationSpeed,
-                stepMode: this.sortingState.stepMode
+                stepMode: this.state.status === 'stepping'
             }
         });
     }
@@ -254,14 +266,20 @@ class SortingEngine {
      * Pause the sorting process
      */
     pauseSorting() {
-        if (!this.sortingState.inProgress || this.sortingState.paused) {
+        if (this.state.status !== 'running') {
             return;
         }
         
-        this.sortingState.paused = true;
+        this.state.status = 'paused';
         if (this.worker) {
             this.worker.postMessage({
                 type: 'pause_sorting'
+            });
+        }
+        
+        if (this.callbacks.onOperationUpdate) {
+            this.callbacks.onOperationUpdate('status', {
+                description: 'Sorting paused. Press Resume to continue or Step for step-by-step execution.'
             });
         }
     }
@@ -270,14 +288,30 @@ class SortingEngine {
      * Resume the sorting process
      */
     resumeSorting() {
-        if (!this.sortingState.inProgress || !this.sortingState.paused) {
+        if (this.state.status !== 'paused' && this.state.status !== 'stepping') {
             return;
         }
         
-        this.sortingState.paused = false;
+        // Store previous status for logging
+        const wasInStepMode = this.state.status === 'stepping';
+        
+        this.state.status = 'running';
+        this.state.stepPending = false;
+        
         if (this.worker) {
             this.worker.postMessage({
-                type: 'resume_sorting'
+                type: 'resume_sorting',
+                data: {
+                    wasInStepMode: wasInStepMode
+                }
+            });
+        }
+        
+        if (this.callbacks.onOperationUpdate) {
+            this.callbacks.onOperationUpdate('status', {
+                description: wasInStepMode ? 
+                    'Resumed from step mode to continuous execution.' : 
+                    'Sorting resumed.'
             });
         }
     }
@@ -286,12 +320,12 @@ class SortingEngine {
      * Stop the sorting process
      */
     stopSorting() {
-        if (!this.sortingState.inProgress) {
+        if (this.state.status === 'idle' || this.state.status === 'completed') {
             return;
         }
         
-        this.sortingState.inProgress = false;
-        this.sortingState.paused = false;
+        this.state.status = 'idle';
+        this.state.stepPending = false;
         
         if (this.worker) {
             this.worker.terminate();
@@ -306,30 +340,127 @@ class SortingEngine {
     }
     
     /**
-     * Enable step-by-step mode
+     * Switch to step-by-step mode
      */
     enableStepMode() {
-        this.sortingState.stepMode = true;
+        if (this.state.status === 'idle' || this.state.status === 'completed') {
+            return;
+        }
+        
+        const previousStatus = this.state.status;
+        this.state.status = 'stepping';
+        
         if (this.worker) {
             this.worker.postMessage({
-                type: 'enable_step_mode'
+                type: 'enable_step_mode',
+                data: {
+                    previousStatus
+                }
+            });
+            
+            // Force state sync - if coming from pause, we need to ensure
+            // the first step can be executed immediately
+            if (previousStatus === 'paused') {
+                setTimeout(() => {
+                    if (this.worker) {
+                        this.worker.postMessage({
+                            type: 'execute_step'
+                        });
+                    }
+                }, 50);
+            }
+        }
+        
+        if (this.callbacks.onOperationUpdate) {
+            this.callbacks.onOperationUpdate('status', {
+                description: previousStatus === 'paused' ?
+                    'Switched from pause to step mode. Continue clicking Step to advance one operation at a time.' :
+                    'Step mode enabled. Click Step to execute one operation at a time.'
             });
         }
     }
     
     /**
      * Execute a single step in step-by-step mode
+     * @returns {boolean} - True if step was executed, false if not possible
      */
     executeStep() {
-        if (!this.sortingState.inProgress || !this.sortingState.stepMode) {
-            return;
+        if (this.state.status === 'idle' || this.state.status === 'completed') {
+            return false;
         }
         
+        // If not already in step mode, switch to it (including from paused state)
+        if (this.state.status !== 'stepping') {
+            this.enableStepMode();
+            
+            // For paused state we need a delay to ensure worker is ready
+            if (this.state.status === 'paused') {
+                // Wait a tiny bit for the state to propagate
+                setTimeout(() => {
+                    if (this.worker) {
+                        console.log('Engine sending delayed execute_step');
+                        this.worker.postMessage({
+                            type: 'execute_step'
+                        });
+                        this.state.stepPending = true;
+                    }
+                }, 50);
+                return true;
+            }
+            return true;
+        }
+        
+        // Clear any previous stepPending state to ensure we can execute another step
+        // This fixes the issue where steps couldn't be executed consecutively
+        this.state.stepPending = false;
+        
+        // Only execute if we have a worker
         if (this.worker) {
+            this.state.stepPending = true;
+            
+            // Update UI to indicate step is in progress
+            if (this.callbacks.onOperationUpdate) {
+                this.callbacks.onOperationUpdate('step', {
+                    description: 'Executing a single operation...'
+                });
+            }
+            
+            // Log step execution for debugging
+            console.log('Engine sending step command, status:', this.state.status);
+            
             this.worker.postMessage({
                 type: 'execute_step'
             });
+            return true;
         }
+        
+        return false;
+    }
+    
+    /**
+     * Check if a step is in progress
+     * @returns {boolean} - True if a step is currently executing
+     */
+    isStepPending() {
+        return this.state.stepPending;
+    }
+    
+    /**
+     * Get the current status of the sorting process
+     * @returns {string} - Current status ('idle', 'running', 'paused', 'stepping', 'completed')
+     */
+    getStatus() {
+        return this.state.status;
+    }
+    
+    /**
+     * Check if the sorting is currently in progress
+     * @returns {boolean} - True if sorting is in progress (running, paused, or stepping)
+     */
+    isInProgress() {
+        return this.state.status === 'running' || 
+               this.state.status === 'paused' || 
+               this.state.status === 'stepping';
     }
     
     /**
