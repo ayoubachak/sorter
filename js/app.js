@@ -52,6 +52,36 @@ document.addEventListener('DOMContentLoaded', () => {
     const multiThreadedCheckbox = document.getElementById('multiThreadedCheckbox');
     const threadCountSelect = document.getElementById('threadCount');
     
+    // Add advanced speed control elements
+    const advancedSpeedControls = document.createElement('div');
+    advancedSpeedControls.id = 'advancedSpeedControls';
+    advancedSpeedControls.className = 'col-span-3 mt-2 bg-indigo-100 p-2 rounded-lg hidden';
+    advancedSpeedControls.innerHTML = `
+        <div class="flex flex-col gap-1">
+            <label class="text-sm text-gray-700 font-semibold">Advanced Speed Control:</label>
+            <div class="flex items-center gap-2">
+                <span class="text-xs">Slower</span>
+                <input type="range" id="workerDelaySlider" min="10" max="2000" value="200" 
+                    class="flex-grow h-2 bg-indigo-300 rounded-lg appearance-none cursor-pointer">
+                <span class="text-xs">Faster</span>
+            </div>
+            <div class="text-xs text-gray-600 mt-1">Delay between operations: <span id="workerDelayValue">200</span>ms</div>
+        </div>
+        <div class="flex items-center gap-2 mt-2">
+            <input type="checkbox" id="highlightWorkersCheckbox" checked class="form-checkbox h-4 w-4 text-indigo-600">
+            <label for="highlightWorkersCheckbox" class="text-sm text-gray-700">Highlight workers by color</label>
+        </div>
+    `;
+    
+    // Insert after thread count container
+    const controlGroup = document.querySelector('.control-group:last-child');
+    controlGroup.appendChild(advancedSpeedControls);
+    
+    // New elements for worker delay control
+    const workerDelaySlider = document.getElementById('workerDelaySlider');
+    const workerDelayValue = document.getElementById('workerDelayValue');
+    const highlightWorkersCheckbox = document.getElementById('highlightWorkersCheckbox');
+    
     let currentViewMode = 'bars';
     let isFirstSort = true;
     
@@ -111,7 +141,23 @@ document.addEventListener('DOMContentLoaded', () => {
         
         multiThreadedCheckbox.addEventListener('change', () => {
             threadCountSelect.disabled = !multiThreadedCheckbox.checked;
+            advancedSpeedControls.classList.toggle('hidden', !multiThreadedCheckbox.checked);
             updateAlgorithmInfo(algorithmSelect.value);
+        });
+        
+        workerDelaySlider.addEventListener('input', () => {
+            const delayValue = workerDelaySlider.value;
+            workerDelayValue.textContent = delayValue;
+            
+            if (sortingEngine) {
+                sortingEngine.setWorkerDelay(parseInt(delayValue));
+            }
+        });
+        
+        highlightWorkersCheckbox.addEventListener('change', () => {
+            if (sortingEngine) {
+                sortingEngine.setHighlightWorkers(highlightWorkersCheckbox.checked);
+            }
         });
         
         algorithmSelect.addEventListener('change', () => {
@@ -150,6 +196,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const algorithm = algorithmSelect.value;
         const useMultiThreading = multiThreadedCheckbox.checked && isAlgorithmMultiThreadable(algorithm);
         const threadCount = useMultiThreading ? parseInt(threadCountSelect.value) : 1;
+        
+        // Set the worker delay if multi-threading is enabled
+        if (useMultiThreading) {
+            const workerDelay = parseInt(workerDelaySlider.value);
+            sortingEngine.setWorkerDelay(workerDelay);
+            sortingEngine.setHighlightWorkers(highlightWorkersCheckbox.checked);
+        }
         
         sortingEngine.startSorting(algorithm, false, useMultiThreading, threadCount);
         isFirstSort = false;
@@ -387,9 +440,11 @@ document.addEventListener('DOMContentLoaded', () => {
             multiThreadedCheckbox.checked = false;
             multiThreadedCheckbox.disabled = true;
             threadCountSelect.disabled = true;
+            advancedSpeedControls.classList.add('hidden');
         } else {
             multiThreadedCheckbox.disabled = false;
             threadCountSelect.disabled = !multiThreadedCheckbox.checked;
+            advancedSpeedControls.classList.toggle('hidden', !multiThreadedCheckbox.checked);
         }
         
         // Show message about multi-threading support

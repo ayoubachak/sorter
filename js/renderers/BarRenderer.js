@@ -23,12 +23,27 @@ class BarRenderer {
         this.activeIndices = [];
         this.sortedIndices = [];
         
+        // Store worker-specific indices and colors
+        this.workerIndices = {};
+        this.workerColors = [
+            '#e74c3c', // Red
+            '#2ecc71', // Green
+            '#3498db', // Blue
+            '#f39c12', // Orange
+            '#9b59b6', // Purple
+            '#1abc9c', // Turquoise
+            '#d35400', // Pumpkin
+            '#34495e'  // Dark Blue
+        ];
+        
         this.colorScheme = {
             background: '#f8f9fa',
             bar: '#3498db',
             active: '#e74c3c',
             sorted: '#2ecc71',
-            text: '#333333'
+            text: '#333333',
+            mergeSource: '#f39c12', // Orange
+            mergeTarget: '#9b59b6'  // Purple
         };
         
         this.initialize();
@@ -68,12 +83,19 @@ class BarRenderer {
      * @param {number} maxValue - Maximum value in the array
      * @param {Array<number>} activeIndices - Indices of active elements
      * @param {Array<number>} sortedIndices - Indices of sorted elements
+     * @param {string|number} workerId - ID of the worker (for multi-threading)
+     * @param {boolean} mergeOperation - Whether this is a merge operation
      */
-    render(array, maxValue, activeIndices = [], sortedIndices = []) {
+    render(array, maxValue, activeIndices = [], sortedIndices = [], workerId = null, mergeOperation = false) {
         this.array = array;
         this.maxValue = maxValue;
         this.activeIndices = activeIndices;
         this.sortedIndices = sortedIndices;
+        
+        // If this is a worker update, store the indices for that worker
+        if (workerId !== null) {
+            this.workerIndices[workerId] = activeIndices;
+        }
         
         // Clear the canvas
         this.clear();
@@ -89,18 +111,43 @@ class BarRenderer {
             const y = this.height - barHeight;
             
             // Determine the color based on the element state
-            if (activeIndices.includes(i)) {
-                this.ctx.fillStyle = this.colorScheme.active;
+            let barColor;
+            
+            if (mergeOperation && activeIndices.includes(i)) {
+                // For merge operations, use special colors
+                if (i === activeIndices[0]) {
+                    barColor = this.colorScheme.mergeSource; // Source element
+                } else if (i === activeIndices[1]) {
+                    barColor = this.colorScheme.mergeTarget; // Target element
+                }
+            } else if (activeIndices.includes(i)) {
+                // Use active color or worker-specific color if available
+                barColor = workerId !== null && workerId >= 0 ? 
+                    this.workerColors[workerId % this.workerColors.length] : 
+                    this.colorScheme.active;
             } else if (sortedIndices.includes(i)) {
-                this.ctx.fillStyle = this.colorScheme.sorted;
+                barColor = this.colorScheme.sorted;
             } else {
-                // Use a gradient for normal bars based on value
-                const normalizedValue = value / (maxValue || 1);
-                const hue = 210 + normalizedValue * 60; // Blue to purple gradient
-                this.ctx.fillStyle = `hsl(${hue}, 70%, 50%)`;
+                // Check if this index is part of any worker's active set
+                let isPartOfWorker = false;
+                for (const wId in this.workerIndices) {
+                    if (this.workerIndices[wId].includes(i)) {
+                        barColor = this.workerColors[wId % this.workerColors.length];
+                        isPartOfWorker = true;
+                        break;
+                    }
+                }
+                
+                // If not part of any worker, use the default gradient
+                if (!isPartOfWorker) {
+                    const normalizedValue = value / (maxValue || 1);
+                    const hue = 210 + normalizedValue * 60; // Blue to purple gradient
+                    barColor = `hsl(${hue}, 70%, 50%)`;
+                }
             }
             
             // Draw the bar with a small gap between bars
+            this.ctx.fillStyle = barColor;
             this.ctx.fillRect(x + 1, y, barWidth - 2, barHeight);
             
             // Draw value text for larger arrays
@@ -111,20 +158,180 @@ class BarRenderer {
                 this.ctx.fillText(value.toString(), x + barWidth / 2, y - 5);
             }
         }
+        
+        // Draw worker legends if there are active workers
+        if (Object.keys(this.workerIndices).length > 0) {
+            this.drawWorkerLegends();
+        }
+        
+        // If this is a merge operation, draw a special legend
+        if (mergeOperation) {
+            this.drawMergeLegend();
+        }
+    }
+    
+    /**
+     * Draw color legends for all active workers
+     */
+    drawWorkerLegends() {
+        const legendWidth = 100;
+        const legendHeight = 25;
+        const padding = 10;
+        const spacing = 5;
+        
+        // Background for all legends
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        this.ctx.fillRect(
+            this.width - legendWidth - padding, 
+            padding, 
+            legendWidth, 
+            (Object.keys(this.workerIndices).length * (legendHeight + spacing)) + spacing
+        );
+        
+        // Draw a legend for each worker
+        let yOffset = padding + spacing;
+        for (const workerId in this.workerIndices) {
+            // Worker color sample
+            this.ctx.fillStyle = this.workerColors[workerId % this.workerColors.length];
+            this.ctx.fillRect(
+                this.width - legendWidth - padding + 10, 
+                yOffset, 
+                20, 
+                legendHeight - 10
+            );
+            
+            // Worker text
+            this.ctx.fillStyle = '#333';
+            this.ctx.font = '12px Arial';
+            this.ctx.textAlign = 'left';
+            this.ctx.fillText(
+                `Worker ${workerId}`, 
+                this.width - legendWidth - padding + 40, 
+                yOffset + 15
+            );
+            
+            yOffset += legendHeight + spacing;
+        }
+    }
+    
+    /**
+     * Draw a legend specifically for merge operations
+     */
+    drawMergeLegend() {
+        const legendWidth = 140;
+        const legendHeight = 60;
+        const padding = 10;
+        
+        // Background
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        this.ctx.fillRect(
+            this.width - legendWidth - padding, 
+            this.height - legendHeight - padding, 
+            legendWidth, 
+            legendHeight
+        );
+        
+        // Source color sample
+        this.ctx.fillStyle = this.colorScheme.mergeSource;
+        this.ctx.fillRect(
+            this.width - legendWidth - padding + 10, 
+            this.height - legendHeight - padding + 15, 
+            20, 
+            10
+        );
+        
+        // Source text
+        this.ctx.fillStyle = '#333';
+        this.ctx.font = '12px Arial';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText(
+            'Source Element', 
+            this.width - legendWidth - padding + 40, 
+            this.height - legendHeight - padding + 23
+        );
+        
+        // Target color sample
+        this.ctx.fillStyle = this.colorScheme.mergeTarget;
+        this.ctx.fillRect(
+            this.width - legendWidth - padding + 10, 
+            this.height - legendHeight - padding + 35, 
+            20, 
+            10
+        );
+        
+        // Target text
+        this.ctx.fillStyle = '#333';
+        this.ctx.font = '12px Arial';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText(
+            'Target Position', 
+            this.width - legendWidth - padding + 40, 
+            this.height - legendHeight - padding + 43
+        );
     }
     
     /**
      * Highlight specific elements
      * @param {Array<number>} indices - Indices to highlight
      * @param {string} highlightType - Type of highlight ('active', 'sorted')
+     * @param {number} workerId - ID of the worker for multi-threading
+     * @param {boolean} mergeOperation - Whether this is a merge operation
      */
-    highlight(indices, highlightType = 'active') {
+    highlight(indices, highlightType = 'active', workerId = null, mergeOperation = false) {
         if (highlightType === 'active') {
             this.activeIndices = indices;
         } else if (highlightType === 'sorted') {
             this.sortedIndices = indices;
         }
         
+        // If highlighting worker activity, store the worker ID
+        if (workerId !== null) {
+            this.workerIndices[workerId] = indices;
+        }
+        
+        this.render(this.array, this.maxValue, this.activeIndices, this.sortedIndices, workerId, mergeOperation);
+    }
+    
+    /**
+     * Update for a worker operation
+     * @param {number} workerId - Worker ID
+     * @param {Array<number>} indices - Indices being processed by the worker
+     * @param {Array<number>} array - Current array state (optional)
+     */
+    updateWorkerActivity(workerId, indices, array = null) {
+        if (!indices || indices.length === 0) {
+            // Clear this worker's indices if none provided
+            delete this.workerIndices[workerId];
+        } else {
+            // Store these indices for this worker
+            this.workerIndices[workerId] = indices;
+        }
+        
+        // If array is provided, update our array state
+        if (array) {
+            // Update the entire array if provided
+            this.array = [...array];
+        }
+        
+        // Render with current active indices, but pass the worker ID
+        this.render(this.array, this.maxValue, this.activeIndices, this.sortedIndices, workerId);
+    }
+    
+    /**
+     * Update for a merge operation visualization
+     * @param {Array<number>} array - Current array state
+     * @param {Array<number>} indices - Indices involved in the merge (source and target)
+     */
+    updateMergeOperation(array, indices) {
+        // Render with the special merge flag
+        this.render(array, this.maxValue, indices, this.sortedIndices, null, true);
+    }
+    
+    /**
+     * Reset all worker indices
+     */
+    resetWorkers() {
+        this.workerIndices = {};
         this.render(this.array, this.maxValue, this.activeIndices, this.sortedIndices);
     }
     

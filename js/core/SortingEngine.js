@@ -27,6 +27,8 @@ class SortingEngine {
         this.useMultiThreading = false;
         this.threadCount = 1;
         this.animationSpeed = 50; // 1-100
+        this.workerDelay = 200; // Default delay for worker operations in ms
+        this.highlightWorkers = true; // Whether to highlight which worker is processing which elements
         this.soundManager = new SoundManager(); // Initialize the sound manager
         this.callbacks = {
             onArrayUpdate: null,
@@ -279,7 +281,8 @@ class SortingEngine {
                     case 'array_update':
                         this.array = data.array;
                         if (this.callbacks.onArrayUpdate) {
-                            this.callbacks.onArrayUpdate(this.array, data.indices);
+                            // Pass worker ID for highlighting if available
+                            this.callbacks.onArrayUpdate(this.array, data.indices, data.workerId);
                         }
                         break;
                         
@@ -330,6 +333,14 @@ class SortingEngine {
                         this.state.stepPending = false;
                         break;
                     
+                    case 'worker_visual_update':
+                        // Update visualization for a specific worker without changing the array
+                        if (this.callbacks.onArrayUpdate && this.highlightWorkers) {
+                            // We don't update this.array here as we're just highlighting activity
+                            this.callbacks.onArrayUpdate(this.array, data.indices, data.workerId);
+                        }
+                        break;
+                    
                     case 'error':
                         console.error('Worker error:', data.message);
                         if (this.callbacks.onOperationUpdate) {
@@ -352,14 +363,16 @@ class SortingEngine {
             
             console.log('Initializing multi-threaded sorting with', this.threadCount, 'threads');
             
-            // Start the coordinator worker
+            // Start the coordinator worker with additional parameters
             this.worker.postMessage({
                 type: 'start_multi_threaded_sorting',
                 data: {
                     algorithm: algorithmName,
                     array: [...this.array],
                     speed: this.animationSpeed,
-                    threadCount: this.threadCount
+                    threadCount: this.threadCount,
+                    workerDelay: this.workerDelay,
+                    highlightWorkers: this.highlightWorkers
                 }
             });
         } catch (error) {
@@ -698,6 +711,38 @@ class SortingEngine {
      */
     registerCallbacks(callbacks) {
         this.callbacks = { ...this.callbacks, ...callbacks };
+    }
+    
+    /**
+     * Set the delay for worker operations (for multi-threading)
+     * @param {number} delay - Delay in milliseconds
+     */
+    setWorkerDelay(delay) {
+        this.workerDelay = delay;
+        
+        // Update current workers if they exist
+        if (this.useMultiThreading && this.worker) {
+            this.worker.postMessage({
+                type: 'set_worker_delay',
+                data: { delay: this.workerDelay }
+            });
+        }
+    }
+    
+    /**
+     * Set whether to highlight worker activity
+     * @param {boolean} highlight - Whether to highlight workers
+     */
+    setHighlightWorkers(highlight) {
+        this.highlightWorkers = highlight;
+        
+        // Update current workers if they exist
+        if (this.useMultiThreading && this.worker) {
+            this.worker.postMessage({
+                type: 'set_highlight_workers',
+                data: { highlight: this.highlightWorkers }
+            });
+        }
     }
 }
 

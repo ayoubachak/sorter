@@ -16,6 +16,24 @@ class SortingVisualizer {
         this.maxValue = 0;
         this.activeIndices = [];
         this.sortedIndices = [];
+        this.workerColors = [
+            '#FF5733', // Red-orange
+            '#33A8FF', // Light blue
+            '#33FF57', // Light green
+            '#A833FF', // Purple
+            '#FFD700', // Gold
+            '#FF33A8', // Pink
+            '#00CED1', // Turquoise
+            '#FF8C00', // Dark orange
+            '#9ACD32', // Yellow-green
+            '#BA55D3', // Medium orchid
+            '#20B2AA', // Light sea green
+            '#F08080', // Light coral
+            '#4682B4', // Steel blue
+            '#D2691E', // Chocolate
+            '#6A5ACD', // Slate blue
+            '#808000'  // Olive
+        ];
         
         this.currentRenderer = null;
         this.rendererType = 'bars'; // Default renderer type: 'bars', 'circular', 'scatter', '3d'
@@ -84,15 +102,22 @@ class SortingVisualizer {
      * @param {Array<number>} array - The array to visualize
      * @param {Array<number>} activeIndices - Indices of elements currently being processed
      * @param {Array<number>} sortedIndices - Indices of elements that are already sorted
+     * @param {number} workerId - ID of the worker processing these elements (for multi-threading)
      */
-    updateArray(array, activeIndices = [], sortedIndices = []) {
+    updateArray(array, activeIndices = [], sortedIndices = [], workerId = -1) {
         this.array = array;
         this.maxValue = Math.max(...array);
         this.activeIndices = activeIndices;
         this.sortedIndices = sortedIndices;
         
         if (this.currentRenderer) {
-            this.currentRenderer.render(array, this.maxValue, activeIndices, sortedIndices);
+            // If a worker ID is provided, use that worker's color for highlighting
+            let highlightColor = undefined;
+            if (workerId >= 0 && workerId < this.workerColors.length) {
+                highlightColor = this.workerColors[workerId];
+            }
+            
+            this.currentRenderer.render(array, this.maxValue, activeIndices, sortedIndices, highlightColor);
         }
     }
     
@@ -113,8 +138,9 @@ class SortingVisualizer {
      * Highlight specific elements in the array
      * @param {Array<number>} indices - Indices to highlight
      * @param {string} highlightType - Type of highlight ('active', 'sorted', etc.)
+     * @param {number} workerId - ID of the worker to use for color (for multi-threading)
      */
-    highlightElements(indices, highlightType = 'active') {
+    highlightElements(indices, highlightType = 'active', workerId = -1) {
         if (highlightType === 'active') {
             this.activeIndices = indices;
         } else if (highlightType === 'sorted') {
@@ -122,7 +148,13 @@ class SortingVisualizer {
         }
         
         if (this.currentRenderer) {
-            this.currentRenderer.highlight(indices, highlightType);
+            // If a worker ID is provided, use that worker's color for highlighting
+            let highlightColor = undefined;
+            if (workerId >= 0 && workerId < this.workerColors.length) {
+                highlightColor = this.workerColors[workerId];
+            }
+            
+            this.currentRenderer.highlight(indices, highlightType, highlightColor);
         }
     }
     

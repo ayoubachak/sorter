@@ -11,6 +11,8 @@ let workerState = {
     workersReady: 0,
     workersCompleted: 0,
     speed: 50,
+    workerDelay: 200, // Default delay between worker operations in ms
+    highlightWorkers: true, // Whether to highlight which worker is processing which elements
     metrics: {
         comparisons: 0,
         swaps: 0,
@@ -19,7 +21,8 @@ let workerState = {
     subArrays: [],           // Array partitions for each worker
     sortedSubArrays: [],     // Sorted partitions returned by workers
     workers: [],             // Worker references
-    status: 'idle'           // 'idle', 'initializing', 'sorting', 'merging', 'completed'
+    status: 'idle',          // 'idle', 'initializing', 'sorting', 'merging', 'completed'
+    workerRanges: []         // Store start and end indices for each worker's partition
 };
 
 // Import algorithm information
@@ -32,14 +35,19 @@ console.log('MultiThreadedWorker: Loaded algorithms.js');
  * @param {Array} array - Array to sort
  * @param {number} threadCount - Number of worker threads to use
  * @param {number} speed - Animation speed
+ * @param {number} workerDelay - Delay between worker operations
+ * @param {boolean} highlightWorkers - Whether to highlight worker activity
  */
-function startMultiThreadedSorting(algorithm, array, threadCount, speed) {
+function startMultiThreadedSorting(algorithm, array, threadCount, speed, workerDelay = 200, highlightWorkers = true) {
     console.log('MultiThreadedWorker: Starting sorting with', threadCount, 'threads');
     
     workerState.algorithm = algorithm;
     workerState.originalArray = [...array];
     workerState.threadCount = threadCount;
     workerState.speed = speed;
+    // Cap the worker delay to be more responsive
+    workerState.workerDelay = Math.min(100, workerDelay);
+    workerState.highlightWorkers = highlightWorkers;
     workerState.workersReady = 0;
     workerState.workersCompleted = 0;
     workerState.status = 'initializing';
@@ -48,9 +56,10 @@ function startMultiThreadedSorting(algorithm, array, threadCount, speed) {
     // Reset sub-arrays
     workerState.subArrays = [];
     workerState.sortedSubArrays = [];
+    workerState.workerRanges = [];
     
     sendOperationUpdate('multi-threading', {
-        description: `Starting multi-threaded ${algorithm} sort with ${threadCount} workers`
+        description: `Starting multi-threaded ${algorithm} sort with ${threadCount} workers (delay: ${workerState.workerDelay}ms)`
     });
     
     // Different approach for different algorithms
@@ -100,6 +109,7 @@ function initializeMergeSortThreads(array, threadCount) {
         const start = i * partitionSize;
         const end = Math.min(start + partitionSize, n);
         workerState.subArrays[i] = array.slice(start, end);
+        workerState.workerRanges[i] = { start, end: end - 1 };
     }
     
     // Initialize workers
@@ -125,11 +135,12 @@ function initializeMergeSortThreads(array, threadCount) {
                     algorithm: workerState.algorithm,
                     array: workerState.subArrays[i],
                     workerId: i,
-                    speed: workerState.speed
+                    speed: workerState.speed,
+                    workerDelay: workerState.workerDelay
                 }
             });
             
-            console.log(`Started worker ${i} with ${workerState.subArrays[i].length} elements`);
+            console.log(`Started worker ${i} with ${workerState.subArrays[i].length} elements (delay: ${workerState.workerDelay}ms)`);
         } catch (error) {
             sendError(`Failed to create worker ${i}: ${error.message}`);
             console.error(`Failed to create worker ${i}:`, error);
@@ -187,6 +198,17 @@ function initializeQuickSortThreads(array, threadCount) {
     // Save partitions as sub-arrays
     workerState.subArrays = partitions;
     
+    // Track the global index ranges for each partition
+    let startIdx = 0;
+    for (let i = 0; i < threadCount; i++) {
+        const partitionSize = partitions[i].length;
+        workerState.workerRanges[i] = { 
+            start: startIdx, 
+            end: startIdx + partitionSize - 1 
+        };
+        startIdx += partitionSize;
+    }
+    
     // Initialize workers
     for (let i = 0; i < threadCount; i++) {
         try {
@@ -210,11 +232,12 @@ function initializeQuickSortThreads(array, threadCount) {
                     algorithm: workerState.algorithm,
                     array: workerState.subArrays[i],
                     workerId: i,
-                    speed: workerState.speed
+                    speed: workerState.speed,
+                    workerDelay: workerState.workerDelay
                 }
             });
             
-            console.log(`Started worker ${i} with ${workerState.subArrays[i].length} elements`);
+            console.log(`Started worker ${i} with ${workerState.subArrays[i].length} elements (delay: ${workerState.workerDelay}ms)`);
         } catch (error) {
             sendError(`Failed to create worker ${i}: ${error.message}`);
             console.error(`Failed to create worker ${i}:`, error);
@@ -241,6 +264,7 @@ function initializeTimSortThreads(array, threadCount) {
         const start = i * partitionSize;
         const end = Math.min(start + partitionSize, n);
         workerState.subArrays[i] = array.slice(start, end);
+        workerState.workerRanges[i] = { start, end: end - 1 };
     }
     
     // Initialize workers
@@ -266,11 +290,12 @@ function initializeTimSortThreads(array, threadCount) {
                     algorithm: 'insertion', // Use insertion sort for small partitions as Tim Sort would
                     array: workerState.subArrays[i],
                     workerId: i,
-                    speed: workerState.speed
+                    speed: workerState.speed,
+                    workerDelay: workerState.workerDelay
                 }
             });
             
-            console.log(`Started worker ${i} with ${workerState.subArrays[i].length} elements`);
+            console.log(`Started worker ${i} with ${workerState.subArrays[i].length} elements (delay: ${workerState.workerDelay}ms)`);
         } catch (error) {
             sendError(`Failed to create worker ${i}: ${error.message}`);
             console.error(`Failed to create worker ${i}:`, error);
@@ -311,6 +336,7 @@ function initializeRadixSortThreads(array, threadCount) {
         const start = i * partitionSize;
         const end = Math.min(start + partitionSize, n);
         workerState.subArrays[i] = array.slice(start, end);
+        workerState.workerRanges[i] = { start, end: end - 1 };
     }
     
     // Initialize workers
@@ -337,11 +363,12 @@ function initializeRadixSortThreads(array, threadCount) {
                     array: workerState.subArrays[i],
                     workerId: i,
                     speed: workerState.speed,
-                    maxDigits: digits
+                    maxDigits: digits,
+                    workerDelay: workerState.workerDelay
                 }
             });
             
-            console.log(`Started worker ${i} with ${workerState.subArrays[i].length} elements`);
+            console.log(`Started worker ${i} with ${workerState.subArrays[i].length} elements (delay: ${workerState.workerDelay}ms)`);
         } catch (error) {
             sendError(`Failed to create worker ${i}: ${error.message}`);
             console.error(`Failed to create worker ${i}:`, error);
@@ -367,12 +394,90 @@ function handleWorkerMessage(message, workerId) {
             break;
             
         case 'progress':
-            // Forward progress updates from individual workers
+            // Forward progress updates from individual workers and show visual indication
             sendOperationUpdate('worker-progress', {
                 workerId: workerId,
                 progress: data.progress,
                 description: `Worker ${workerId} progress: ${data.progress}%`
             });
+            
+            // Show visual indication of which elements this worker is processing
+            if (workerState.highlightWorkers) {
+                // If the worker included active indices, use those
+                if (data.activeIndices && data.activeIndices.length > 0) {
+                    const workerRange = workerState.workerRanges[workerId];
+                    if (workerRange) {
+                        // Map worker's local indices to global indices
+                        const globalIndices = data.activeIndices.map(idx => 
+                            workerRange.start + Math.min(idx, workerState.subArrays[workerId].length - 1)
+                        );
+                        
+                        // Send visual update with the worker's current array state
+                        sendWorkerVisualUpdate(workerId, globalIndices, data.array);
+                        
+                        // Add non-blocking delay
+                        setTimeout(() => {}, 0);
+                    }
+                } else {
+                    const workerRange = workerState.workerRanges[workerId];
+                    if (workerRange) {
+                        // Instead of random indices, highlight a section of the worker's assigned partition
+                        // to show real-time processing
+                        const partitionSize = workerRange.end - workerRange.start + 1;
+                        const progress = data.progress / 100; // Convert to 0-1 scale
+                        
+                        // Highlight a window of elements around the current progress point
+                        const windowSize = Math.min(10, Math.ceil(partitionSize * 0.2));
+                        const centerIdx = Math.floor(workerRange.start + progress * partitionSize);
+                        
+                        // Create an array of indices to highlight around the center point
+                        let globalIndices = [];
+                        const halfWindow = Math.floor(windowSize / 2);
+                        
+                        for (let i = Math.max(workerRange.start, centerIdx - halfWindow); 
+                             i <= Math.min(workerRange.end, centerIdx + halfWindow); i++) {
+                            globalIndices.push(i);
+                        }
+                        
+                        // Send visual update
+                        sendWorkerVisualUpdate(workerId, globalIndices, data.array);
+                        
+                        // Add non-blocking delay
+                        setTimeout(() => {}, 0);
+                    }
+                }
+            }
+            
+            // Update metrics from worker if available
+            if (data.metrics) {
+                // These are incremental updates, so add to our current metrics
+                if (data.metrics.comparisons) workerState.metrics.comparisons += 1;
+                if (data.metrics.swaps) workerState.metrics.swaps += 1;
+                if (data.metrics.accesses) workerState.metrics.accesses += 1;
+                
+                sendMetricsUpdate();
+            }
+            break;
+            
+        case 'worker_visual_update':
+            // Process visual updates from workers with their current array state
+            if (workerState.highlightWorkers) {
+                const workerRange = workerState.workerRanges[workerId];
+                if (workerRange && data.indices) {
+                    // Map worker's local indices to global indices
+                    const globalIndices = data.indices.map(idx => 
+                        workerRange.start + Math.min(idx, workerState.subArrays[workerId].length - 1)
+                    );
+                    
+                    // Send visual update
+                    sendWorkerVisualUpdate(workerId, globalIndices, data.array);
+                    
+                    // If the worker also included its current array state, update our tracking
+                    if (data.array) {
+                        updateWorkerArraySection(workerId, data.array);
+                    }
+                }
+            }
             break;
             
         case 'metrics':
@@ -410,6 +515,23 @@ function handleWorkerMessage(message, workerId) {
 }
 
 /**
+ * Update the array state with a worker's current section
+ */
+function updateWorkerArraySection(workerId, workerArray) {
+    if (!workerArray || !workerState.workerRanges[workerId]) return;
+    
+    // Get the range for this worker
+    const range = workerState.workerRanges[workerId];
+    const startIdx = range.start;
+    
+    // Update the original array with the worker's current array state
+    const sectionLength = Math.min(workerArray.length, range.end - range.start + 1);
+    for (let i = 0; i < sectionLength; i++) {
+        workerState.originalArray[startIdx + i] = workerArray[i];
+    }
+}
+
+/**
  * Merge the sorted sub-arrays from all workers
  */
 function mergeResults() {
@@ -432,8 +554,9 @@ function mergeResults() {
     switch (workerState.algorithm) {
         case 'merge':
         case 'tim':
-            finalSortedArray = mergeSortedArrays(workerState.sortedSubArrays);
-            break;
+            // Visualize the merge process for merge and tim sorts
+            visualizeMerging(workerState.sortedSubArrays);
+            return; // The visualization function will handle final array update
             
         case 'quick':
             // For quick sort, just concatenate the sorted partitions
@@ -441,8 +564,9 @@ function mergeResults() {
             break;
             
         case 'radix':
-            finalSortedArray = mergeSortedArrays(workerState.sortedSubArrays);
-            break;
+            // For radix sort, visualize the merging process
+            visualizeMerging(workerState.sortedSubArrays);
+            return; // The visualization function will handle final array update
             
         default:
             finalSortedArray = [].concat(...workerState.sortedSubArrays);
@@ -454,6 +578,101 @@ function mergeResults() {
     // Mark sorting as completed
     workerState.status = 'completed';
     sendSortingComplete();
+}
+
+/**
+ * Visualize the process of merging sorted subarrays
+ * @param {Array<Array>} sortedArrays - The sorted subarrays to merge
+ */
+async function visualizeMerging(sortedArrays) {
+    const mergeDelay = workerState.workerDelay * 2; // Slow down merging for visibility
+    
+    sendOperationUpdate('merging-visualization', {
+        description: `Visualizing the merging of ${sortedArrays.length} sorted subarrays`
+    });
+    
+    // Use a clone of the original array to build up our result
+    let resultArray = [...workerState.originalArray];
+    
+    // Prepare an array of pointers, one for each sorted subarray
+    const pointers = Array(sortedArrays.length).fill(0);
+    
+    // Calculate total elements to merge and prepare global indices mapping
+    const totalElements = sortedArrays.reduce((sum, arr) => sum + arr.length, 0);
+    
+    // Keep track of where each subarray starts in the global array
+    let globalStartIndices = [];
+    let startIdx = 0;
+    for (let i = 0; i < sortedArrays.length; i++) {
+        globalStartIndices[i] = startIdx;
+        startIdx += sortedArrays[i].length;
+    }
+    
+    // Perform merge with visualization
+    for (let resultIdx = 0; resultIdx < totalElements; resultIdx++) {
+        let minValue = Infinity;
+        let minArrayIdx = -1;
+        
+        // Find the minimum value across all arrays
+        for (let i = 0; i < sortedArrays.length; i++) {
+            if (pointers[i] < sortedArrays[i].length) {
+                const value = sortedArrays[i][pointers[i]];
+                if (value < minValue) {
+                    minValue = value;
+                    minArrayIdx = i;
+                }
+            }
+        }
+        
+        // If we found a minimum, add it to the result array
+        if (minArrayIdx !== -1) {
+            // Calculate the global position for this element
+            const globalPosition = globalStartIndices[minArrayIdx] + pointers[minArrayIdx];
+            
+            // Update result array
+            resultArray[resultIdx] = minValue;
+            
+            // Visualize this merge step
+            sendOperationUpdate('merge-step', {
+                description: `Merging element ${minValue} from worker ${minArrayIdx} to position ${resultIdx}`
+            });
+            
+            // Highlight both the source and destination positions
+            const indicesToHighlight = [globalPosition, resultIdx];
+            
+            // Send visual update
+            self.postMessage({
+                type: 'array_update',
+                data: {
+                    array: resultArray,
+                    indices: indicesToHighlight,
+                    mergeOperation: true
+                }
+            });
+            
+            // Increment the pointer for the array we took from
+            pointers[minArrayIdx]++;
+            
+            // Add delay for visualization
+            await delayPromise(mergeDelay);
+        }
+    }
+    
+    // After merging is complete, send the final sorted array
+    sendFullArrayUpdate(resultArray);
+    
+    // Mark sorting as completed
+    workerState.status = 'completed';
+    sendSortingComplete();
+}
+
+/**
+ * Create a promise-based delay
+ * @param {number} ms - Milliseconds to delay
+ * @returns {Promise} - Promise that resolves after the delay
+ */
+function delayPromise(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
@@ -492,32 +711,66 @@ function mergeSortedArrays(arrays) {
  * @param {Array} array - Sorted sub-array
  */
 function sendArrayUpdateForWorker(workerId, array) {
-    // Calculate the global indices for this worker's partition
-    let globalIndices = [];
-    let startIndex = 0;
+    // Get the global range information for this worker
+    const workerRange = workerState.workerRanges[workerId];
+    if (!workerRange) return;
     
-    // Sum up the lengths of previous partitions
-    for (let i = 0; i < workerId; i++) {
-        startIndex += workerState.subArrays[i].length;
-    }
-    
-    // Create global indices array
-    for (let i = 0; i < array.length; i++) {
-        globalIndices.push(startIndex + i);
-    }
+    // Create global indices array for this worker's partition
+    const globalIndices = Array.from(
+        { length: array.length }, 
+        (_, i) => workerRange.start + i
+    );
     
     // Create a full array representation for visualization
     let fullArray = [...workerState.originalArray];
+    
+    // Update only the elements this worker processed
     for (let i = 0; i < array.length; i++) {
-        fullArray[startIndex + i] = array[i];
+        fullArray[workerRange.start + i] = array[i];
     }
+    
+    // Also update our tracking of the original array
+    updateWorkerArraySection(workerId, array);
     
     self.postMessage({
         type: 'array_update',
         data: {
             array: fullArray,
-            indices: globalIndices
+            indices: globalIndices,
+            workerId: workerId // Pass the worker ID for color coding
         }
+    });
+    
+    // Use a non-blocking delay for visualization
+    setTimeout(() => {}, 0);
+}
+
+/**
+ * Send visual update for worker activity without changing array values
+ * @param {number} workerId - ID of the worker
+ * @param {Array} indices - Indices to highlight
+ * @param {Array} array - Current state of the worker's array (optional)
+ */
+function sendWorkerVisualUpdate(workerId, indices, array = null) {
+    // Create message data
+    const messageData = {
+        indices: indices,
+        workerId: workerId
+    };
+    
+    // If the worker provided its current array state, include it
+    if (array) {
+        // Update our tracking of the original array first
+        updateWorkerArraySection(workerId, array);
+        
+        // Create a full array representation
+        const fullArray = [...workerState.originalArray];
+        messageData.array = fullArray;
+    }
+    
+    self.postMessage({
+        type: 'worker_visual_update',
+        data: messageData
     });
 }
 
@@ -588,7 +841,9 @@ self.addEventListener('message', function(event) {
                 data.algorithm,
                 data.array,
                 data.threadCount,
-                data.speed
+                data.speed,
+                data.workerDelay || 200,
+                data.highlightWorkers !== undefined ? data.highlightWorkers : true
             );
             break;
             
@@ -599,6 +854,24 @@ self.addEventListener('message', function(event) {
                 }
             });
             self.close();
+            break;
+            
+        case 'set_worker_delay':
+            workerState.workerDelay = data.delay;
+            
+            // Propagate to all workers
+            workerState.workers.forEach(worker => {
+                if (worker) {
+                    worker.postMessage({
+                        type: 'set_worker_delay',
+                        data: { delay: workerState.workerDelay }
+                    });
+                }
+            });
+            break;
+            
+        case 'set_highlight_workers':
+            workerState.highlightWorkers = data.highlight;
             break;
     }
 }); 
