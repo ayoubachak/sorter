@@ -202,7 +202,7 @@ class SortingEngine {
                 case 'array_update':
                     this.array = data.array;
                     if (this.callbacks.onArrayUpdate) {
-                        this.callbacks.onArrayUpdate(this.array, data.indices);
+                        this.callbacks.onArrayUpdate(this.array, data.indices, data.workerId);
                     }
                     break;
                     
@@ -216,6 +216,11 @@ class SortingEngine {
                     break;
                     
                 case 'operation_update':
+                    // Add workerId to operation details if available for sound effects
+                    if (data.workerId !== undefined && data.details) {
+                        data.details.workerId = data.workerId;
+                    }
+                    
                     if (this.callbacks.onOperationUpdate) {
                         this.callbacks.onOperationUpdate(data.operation, data.details);
                     }
@@ -230,6 +235,8 @@ class SortingEngine {
                     
                     // Play completion sound
                     this.soundManager.playSound('completed', { volume: 0.6 });
+                    // Also play a completion chord for an enhanced finale
+                    this.soundManager.playChord('completion', { volume: 0.4 });
                     
                     // Reset worker visualizations to clean up the UI
                     if (this.callbacks.onResetWorkerVisualizations) {
@@ -319,6 +326,11 @@ class SortingEngine {
                         break;
                         
                     case 'operation_update':
+                        // Add workerId to operation details if available for sound effects
+                        if (data.workerId !== undefined && data.details) {
+                            data.details.workerId = data.workerId;
+                        }
+                        
                         if (this.callbacks.onOperationUpdate) {
                             this.callbacks.onOperationUpdate(data.operation, data.details);
                         }
@@ -333,6 +345,8 @@ class SortingEngine {
                         
                         // Play completion sound
                         this.soundManager.playSound('completed', { volume: 0.6 });
+                        // Also play a completion chord for an enhanced finale
+                        this.soundManager.playChord('completion', { volume: 0.4 });
                         
                         // Reset worker visualizations to clean up the UI
                         if (this.callbacks.onResetWorkerVisualizations) {
@@ -484,6 +498,18 @@ class SortingEngine {
             return;
         }
         
+        // Check if this is a worker-specific operation in multi-threading mode
+        const workerId = details && details.workerId;
+        
+        if (this.useMultiThreading && workerId !== undefined) {
+            // Use worker-specific sounds to create a multi-threaded "orchestra"
+            this.soundManager.playWorkerSound(workerId, operation, {
+                volume: 0.2,
+                duration: 0.08
+            });
+            return;
+        }
+        
         switch (operation) {
             case 'comparison':
                 this.soundManager.playSound('comparison', { 
@@ -515,6 +541,8 @@ class SortingEngine {
                 });
                 break;
                 
+            // Quick Sort Operations
+            case 'pivot':
             case 'pivot-selection':
                 this.soundManager.playSound('pivot', {
                     volume: 0.4,
@@ -522,6 +550,118 @@ class SortingEngine {
                         ? 0.8 + details.value / (Math.max(...this.array) * 1.5)
                         : 1
                 });
+                break;
+                
+            case 'partition':
+                // Use a mix of sounds for partition operation
+                this.soundManager.playTone(350, 0.1, 0.2);
+                break;
+                
+            case 'pivot-placement':
+                // Important moment in Quick Sort - use distinctive sound
+                this.soundManager.playSound('pivot', {
+                    volume: 0.4,
+                    pitch: 1.2
+                });
+                break;
+                
+            case 'partition-complete':
+                // Play a success tone when partition is complete
+                this.soundManager.playTone(500, 0.2, 0.15);
+                break;
+                
+            // Merge Sort Operations
+            case 'split':
+                // Play a split sound (high to low)
+                this.soundManager.playTone(600, 0.1, 0.15);
+                this.soundManager.playTone(400, 0.1, 0.15);
+                break;
+                
+            case 'merge':
+                // Play a merge sound (low to high)
+                this.soundManager.playTone(300, 0.1, 0.15);
+                this.soundManager.playTone(450, 0.1, 0.15);
+                break;
+                
+            case 'merge-comparison':
+                // Softer comparison sound for merges
+                this.soundManager.playSound('comparison', { 
+                    volume: 0.15,
+                    pitch: 1.2
+                });
+                break;
+                
+            case 'merge-place':
+                // Soft placing sound
+                this.soundManager.playTone(550, 0.05, 0.1);
+                break;
+                
+            case 'merge-complete':
+                // Play a success tone when merge is complete
+                this.soundManager.playTone(600, 0.15, 0.15);
+                break;
+                
+            // Heap Sort Operations
+            case 'build-heap':
+                // Play a building sound
+                this.soundManager.playTone(300, 0.2, 0.2);
+                this.soundManager.playTone(350, 0.2, 0.2);
+                this.soundManager.playTone(400, 0.2, 0.2);
+                break;
+                
+            case 'heapify':
+                // Heapify operation sound
+                this.soundManager.playTone(450, 0.1, 0.2);
+                break;
+                
+            case 'extract-max':
+                // Max extraction sound
+                this.soundManager.playTone(700, 0.2, 0.25);
+                this.soundManager.playTone(500, 0.1, 0.15);
+                break;
+                
+            // Radix/Counting Sort Operations
+            case 'digit-extraction':
+            case 'counting':
+                // Play a digital sound
+                if (details.digit !== undefined) {
+                    // Use digit value for the sound
+                    this.soundManager.playTone(400 + details.digit * 50, 0.05, 0.15);
+                } else {
+                    this.soundManager.playTone(450, 0.05, 0.15);
+                }
+                break;
+                
+            case 'bucket-placement':
+            case 'placement':
+                // Sound for placing an element in a bucket
+                this.soundManager.playTone(600, 0.05, 0.12);
+                break;
+                
+            // Shell Sort Operations
+            case 'gap-change':
+                // Sound for changing the gap
+                if (details.gap) {
+                    // Use gap size for pitch (smaller gap = higher pitch)
+                    const pitch = 1.5 - (details.gap / this.array.length);
+                    this.soundManager.playSound('pivot', {
+                        volume: 0.3,
+                        pitch: Math.max(0.8, Math.min(1.5, pitch))
+                    });
+                }
+                break;
+                
+            // Generic Operations
+            case 'shift':
+                // Element shifting sound
+                this.soundManager.playTone(400, 0.05, 0.1);
+                break;
+                
+            case 'copy-back':
+                // Very soft sound for copying back
+                if (details.index % 5 === 0) { // Only play occasionally to avoid sound overload
+                    this.soundManager.playTone(350, 0.02, 0.05);
+                }
                 break;
         }
     }

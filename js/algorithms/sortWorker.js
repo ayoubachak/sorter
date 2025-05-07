@@ -289,7 +289,8 @@ function sendVisualizationUpdate(indices) {
             stats: {
                 operation: currentOperation,
                 metrics: { ...state.metrics },
-                activeIndices: indices
+                activeIndices: indices,
+                workerId: state.workerId // Include worker ID for sound effects
             }
         }
     });

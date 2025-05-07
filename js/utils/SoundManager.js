@@ -8,6 +8,10 @@ class SoundManager {
         this.sounds = {};
         this.context = null;
         
+        // For throttling worker sounds to prevent audio overload
+        this.lastWorkerSounds = {};
+        this.workerSoundInterval = 100; // Min milliseconds between sounds from the same worker
+        
         this.initAudioContext();
         
         this.loadSounds();
@@ -235,6 +239,128 @@ class SoundManager {
      */
     isSoundEnabled() {
         return this.soundEnabled;
+    }
+    
+    /**
+     * Play a sound for a specific worker thread (for multi-threading visualizations)
+     * @param {number} workerId - ID of the worker thread
+     * @param {string} operation - Operation being performed
+     * @param {Object} options - Additional options
+     */
+    playWorkerSound(workerId, operation, options = {}) {
+        if (!this.soundEnabled || !this.context) {
+            return;
+        }
+        
+        // Throttle sounds from the same worker to prevent audio overload
+        const now = Date.now();
+        const lastSoundTime = this.lastWorkerSounds[workerId] || 0;
+        
+        // Skip if this worker played a sound too recently
+        if (now - lastSoundTime < this.workerSoundInterval) {
+            return;
+        }
+        
+        // Update last sound time for this worker
+        this.lastWorkerSounds[workerId] = now;
+        
+        // Define base frequencies for each worker (using pentatonic scale for harmonious sounds)
+        const baseFrequencies = [
+            262, // C4
+            294, // D4
+            330, // E4
+            349, // F4
+            392, // G4
+            440, // A4
+            494, // B4
+            523  // C5
+        ];
+        
+        // Get the base frequency for this worker
+        const baseFrequency = baseFrequencies[workerId % baseFrequencies.length];
+        
+        // Adjust volume and duration based on operation
+        let volume = options.volume || 0.2;
+        let duration = options.duration || 0.1;
+        
+        // Different sounds for different operations
+        switch (operation) {
+            case 'comparison':
+                this.playTone(baseFrequency, 0.05, volume * 0.6);
+                break;
+                
+            case 'swap':
+                this.playTone(baseFrequency, 0.08, volume * 0.8);
+                this.playTone(baseFrequency * 1.5, 0.08, volume * 0.6);
+                break;
+                
+            case 'merge':
+                this.playTone(baseFrequency * 0.8, 0.08, volume * 0.5);
+                this.playTone(baseFrequency * 1.2, 0.08, volume * 0.5);
+                break;
+                
+            case 'partition':
+                this.playTone(baseFrequency * 1.2, 0.1, volume * 0.7);
+                break;
+                
+            case 'pivot':
+                this.playTone(baseFrequency * 1.5, 0.15, volume * 0.8);
+                break;
+                
+            case 'split':
+                this.playTone(baseFrequency * 1.2, 0.06, volume * 0.5);
+                this.playTone(baseFrequency * 0.8, 0.06, volume * 0.5);
+                break;
+                
+            default:
+                // Default worker activity sound
+                this.playTone(baseFrequency, duration, volume * 0.4);
+        }
+    }
+    
+    /**
+     * Play a chord effect for important algorithm events
+     * @param {string} type - Type of chord ('success', 'warning', etc.)
+     * @param {Object} options - Options for the chord
+     */
+    playChord(type, options = {}) {
+        if (!this.soundEnabled || !this.context) {
+            return;
+        }
+        
+        const volume = options.volume || 0.3;
+        const duration = options.duration || 0.3;
+        
+        switch (type) {
+            case 'success':
+                // Major chord (C E G)
+                this.playTone(261.63, duration, volume); // C
+                this.playTone(329.63, duration, volume * 0.8); // E
+                this.playTone(392.00, duration, volume * 0.6); // G
+                break;
+                
+            case 'warning':
+                // Minor chord (C Eb G)
+                this.playTone(261.63, duration, volume); // C
+                this.playTone(311.13, duration, volume * 0.8); // Eb
+                this.playTone(392.00, duration, volume * 0.6); // G
+                break;
+                
+            case 'error':
+                // Diminished chord (C Eb Gb)
+                this.playTone(261.63, duration, volume); // C
+                this.playTone(311.13, duration, volume); // Eb
+                this.playTone(369.99, duration, volume); // Gb
+                break;
+                
+            case 'completion':
+                // Major 7th chord (C E G B)
+                this.playTone(261.63, duration * 1.5, volume); // C
+                this.playTone(329.63, duration * 1.5, volume * 0.7); // E
+                this.playTone(392.00, duration * 1.5, volume * 0.6); // G
+                this.playTone(493.88, duration * 1.5, volume * 0.5); // B
+                break;
+        }
     }
 }
 
