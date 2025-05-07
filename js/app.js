@@ -123,9 +123,6 @@ document.addEventListener('DOMContentLoaded', () => {
             button.addEventListener('click', () => {
                 const mode = button.getAttribute('data-mode');
                 changeViewMode(mode);
-                
-                viewModeButtons.forEach(btn => btn.classList.remove('active'));
-                button.classList.add('active');
             });
         });
     }
@@ -276,6 +273,20 @@ document.addEventListener('DOMContentLoaded', () => {
     function changeViewMode(mode) {
         currentViewMode = mode;
         visualizer.setRenderer(mode);
+        
+        // Update active button state
+        viewModeButtons.forEach(button => {
+            const buttonMode = button.getAttribute('data-mode');
+            if (buttonMode === mode) {
+                button.classList.add('active');
+                button.classList.remove('bg-gray-200', 'hover:bg-gray-300');
+                button.classList.add('bg-indigo-600', 'text-white');
+            } else {
+                button.classList.remove('active');
+                button.classList.remove('bg-indigo-600', 'text-white');
+                button.classList.add('bg-gray-200', 'hover:bg-gray-300');
+            }
+        });
     }
     
     function updateAlgorithmInfo(algorithmName) {
