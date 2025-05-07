@@ -356,6 +356,22 @@ async function startSorting(algorithm, inputArray, speed, stepMode = false) {
                 await heapSort(array);
                 break;
                 
+            case 'shell':
+                await shellSort(array);
+                break;
+                
+            case 'radix':
+                await radixSort(array);
+                break;
+                
+            case 'counting':
+                await countingSort(array);
+                break;
+                
+            case 'tim':
+                await timSort(array);
+                break;
+                
             default:
                 throw new Error(`Unknown algorithm: ${algorithm}`);
         }
@@ -797,6 +813,416 @@ async function heapify(arr, n, i) {
         
         // Recursively heapify the affected sub-tree
         await heapify(arr, n, largest);
+    }
+}
+
+// Shell Sort Implementation
+async function shellSort(arr) {
+    sendOperationUpdate('algorithm', { 
+        name: 'Shell Sort',
+        description: 'Starting shell sort algorithm'
+    });
+    
+    const n = arr.length;
+    
+    // Define gap sequence (using Knuth's formula: 3ᵏ - 1)
+    let gaps = [];
+    let gap = 1;
+    while (gap < n / 3) {
+        gap = 3 * gap + 1;
+        gaps.unshift(gap);
+    }
+    gaps.push(1); // Always end with gap = 1 (regular insertion sort)
+    
+    // Shell sort using decreasing gaps
+    for (let g = 0; g < gaps.length; g++) {
+        const currentGap = gaps[g];
+        
+        sendOperationUpdate('gap-change', { 
+            gap: currentGap,
+            description: `Using gap size: ${currentGap}`
+        });
+        
+        // Perform insertion sort with the current gap
+        for (let i = currentGap; i < n; i++) {
+            // Wait if paused or if in step mode
+            if (state.status === 'stepping') {
+                await waitForStep();
+            } else if (state.status === 'paused') {
+                await waitIfPaused();
+            }
+            
+            const temp = arrayAccess(arr, i);
+            
+            sendOperationUpdate('key-selection', { 
+                index: i,
+                value: temp,
+                description: `Selected element at position ${i} with value ${temp} for gap ${currentGap}`
+            });
+            
+            let j = i;
+            
+            while (j >= currentGap) {
+                // Wait if paused or if in step mode
+                if (state.status === 'stepping') {
+                    await waitForStep();
+                } else if (state.status === 'paused') {
+                    await waitIfPaused();
+                }
+                
+                const prev = arrayAccess(arr, j - currentGap);
+                
+                sendOperationUpdate('comparison', { 
+                    indices: [j - currentGap, j],
+                    values: [prev, temp],
+                    description: `Comparing elements at positions ${j - currentGap} and ${j} (gap ${currentGap})`
+                });
+                
+                if (compare(prev, temp) <= 0) {
+                    break;
+                }
+                
+                // Move elements
+                sendOperationUpdate('shift', { 
+                    index: j,
+                    value: prev,
+                    description: `Moving element from position ${j - currentGap} to position ${j}`
+                });
+                
+                arr[j] = prev;
+                sendArrayUpdate(arr, [j, j - currentGap]);
+                await delay(delayTime);
+                
+                j -= currentGap;
+            }
+            
+            if (j !== i) {
+                sendOperationUpdate('insertion', { 
+                    index: j,
+                    value: temp,
+                    description: `Inserting ${temp} at position ${j}`
+                });
+                
+                arr[j] = temp;
+                sendArrayUpdate(arr, [j]);
+                await delay(delayTime);
+            }
+        }
+    }
+    
+    return arr;
+}
+
+// Radix Sort Implementation
+async function radixSort(arr) {
+    sendOperationUpdate('algorithm', { 
+        name: 'Radix Sort',
+        description: 'Starting radix sort algorithm (LSD - Least Significant Digit first)'
+    });
+    
+    const n = arr.length;
+    
+    // Find the maximum number to know number of digits
+    let max = arr[0];
+    for (let i = 1; i < n; i++) {
+        max = Math.max(max, arr[i]);
+    }
+    
+    // Do counting sort for every digit
+    for (let exp = 1; Math.floor(max / exp) > 0; exp *= 10) {
+        sendOperationUpdate('digit-position', { 
+            position: exp,
+            description: `Sorting by digit position ${exp}`
+        });
+        
+        await countingSortByDigit(arr, exp);
+    }
+    
+    return arr;
+}
+
+// Helper function for Radix Sort to sort by digit
+async function countingSortByDigit(arr, exp) {
+    const n = arr.length;
+    const output = new Array(n).fill(0);
+    const count = new Array(10).fill(0);
+    
+    // Store count of occurrences in count[]
+    for (let i = 0; i < n; i++) {
+        // Handle stepping or pausing
+        if (state.status === 'stepping') {
+            await waitForStep();
+        } else {
+            await waitIfPaused();
+        }
+        
+        const digit = Math.floor(arrayAccess(arr, i) / exp) % 10;
+        
+        sendOperationUpdate('digit-extraction', { 
+            index: i,
+            value: arr[i],
+            digit: digit,
+            position: exp,
+            description: `Extracting digit from position ${exp}: ${arr[i]} → ${digit}`
+        });
+        
+        count[digit]++;
+    }
+    
+    // Change count[i] so that count[i] contains
+    // actual position of this digit in output[]
+    for (let i = 1; i < 10; i++) {
+        count[i] += count[i - 1];
+        
+        sendOperationUpdate('count-accumulation', { 
+            position: i,
+            value: count[i],
+            description: `Accumulating count for digit ${i}: ${count[i]}`
+        });
+    }
+    
+    // Build the output array
+    for (let i = n - 1; i >= 0; i--) {
+        if (state.status === 'stepping') {
+            await waitForStep();
+        } else {
+            await waitIfPaused();
+        }
+        
+        const value = arrayAccess(arr, i);
+        const digit = Math.floor(value / exp) % 10;
+        
+        output[count[digit] - 1] = value;
+        
+        sendOperationUpdate('bucket-placement', { 
+            index: i,
+            value: value,
+            digit: digit,
+            bucketPosition: count[digit] - 1,
+            description: `Placing ${value} in bucket position ${count[digit] - 1} for digit ${digit}`
+        });
+        
+        count[digit]--;
+    }
+    
+    // Copy the output array to arr[]
+    for (let i = 0; i < n; i++) {
+        if (state.status === 'stepping') {
+            await waitForStep();
+        } else {
+            await waitIfPaused();
+        }
+        
+        arr[i] = output[i];
+        
+        sendOperationUpdate('copy-back', { 
+            index: i,
+            value: arr[i],
+            description: `Copying value ${arr[i]} back to position ${i}`
+        });
+        
+        sendArrayUpdate(arr, [i]);
+        await delay(delayTime);
+    }
+}
+
+// Counting Sort Implementation
+async function countingSort(arr) {
+    sendOperationUpdate('algorithm', { 
+        name: 'Counting Sort',
+        description: 'Starting counting sort algorithm'
+    });
+    
+    const n = arr.length;
+    
+    // Find the maximum and minimum values
+    let max = arr[0], min = arr[0];
+    for (let i = 1; i < n; i++) {
+        max = Math.max(max, arr[i]);
+        min = Math.min(min, arr[i]);
+    }
+    
+    const range = max - min + 1;
+    
+    sendOperationUpdate('range-determination', { 
+        min: min,
+        max: max,
+        range: range,
+        description: `Determined value range: ${min} to ${max} (range: ${range})`
+    });
+    
+    // Create count array and initialize with zeros
+    const count = new Array(range).fill(0);
+    
+    // Store the count of each element
+    for (let i = 0; i < n; i++) {
+        if (state.status === 'stepping') {
+            await waitForStep();
+        } else {
+            await waitIfPaused();
+        }
+        
+        const value = arrayAccess(arr, i);
+        const countIndex = value - min;
+        
+        count[countIndex]++;
+        
+        sendOperationUpdate('counting', { 
+            index: i,
+            value: value,
+            countIndex: countIndex,
+            count: count[countIndex],
+            description: `Counting value ${value} at position ${i}, count = ${count[countIndex]}`
+        });
+    }
+    
+    // Modify the count array to store the position of each element
+    for (let i = 1; i < range; i++) {
+        count[i] += count[i - 1];
+        
+        sendOperationUpdate('count-accumulation', { 
+            position: i,
+            value: count[i],
+            description: `Accumulating count for value ${i + min}: ${count[i]}`
+        });
+    }
+    
+    // Create an output array
+    const output = new Array(n);
+    
+    // Build the output array
+    for (let i = n - 1; i >= 0; i--) {
+        if (state.status === 'stepping') {
+            await waitForStep();
+        } else {
+            await waitIfPaused();
+        }
+        
+        const value = arrayAccess(arr, i);
+        const countIndex = value - min;
+        
+        output[count[countIndex] - 1] = value;
+        count[countIndex]--;
+        
+        sendOperationUpdate('placement', { 
+            originalIndex: i,
+            value: value,
+            newPosition: count[countIndex],
+            description: `Placing ${value} from position ${i} to position ${count[countIndex]}`
+        });
+    }
+    
+    // Copy the output array back to the original array
+    for (let i = 0; i < n; i++) {
+        if (state.status === 'stepping') {
+            await waitForStep();
+        } else {
+            await waitIfPaused();
+        }
+        
+        arr[i] = output[i];
+        
+        sendOperationUpdate('copy-back', { 
+            index: i,
+            value: arr[i],
+            description: `Copying value ${arr[i]} back to position ${i}`
+        });
+        
+        sendArrayUpdate(arr, [i]);
+        await delay(delayTime);
+    }
+    
+    return arr;
+}
+
+// Tim Sort Implementation
+async function timSort(arr) {
+    sendOperationUpdate('algorithm', { 
+        name: 'Tim Sort',
+        description: 'Starting Tim Sort algorithm'
+    });
+    
+    const n = arr.length;
+    const RUN = 32; // Size of subarrays to be sorted with insertion sort
+    
+    // Sort individual subarrays of size RUN
+    for (let i = 0; i < n; i += RUN) {
+        await insertionSortSubarray(arr, i, Math.min(i + RUN - 1, n - 1));
+    }
+    
+    // Start merging from size RUN (or 32)
+    for (let size = RUN; size < n; size = 2 * size) {
+        for (let left = 0; left < n; left += 2 * size) {
+            const mid = Math.min(n - 1, left + size - 1);
+            const right = Math.min(n - 1, left + 2 * size - 1);
+            
+            if (mid < right) {
+                sendOperationUpdate('merge-subarrays', { 
+                    left: left,
+                    mid: mid,
+                    right: right,
+                    description: `Merging subarrays from ${left} to ${mid} and from ${mid + 1} to ${right}`
+                });
+                
+                await merge(arr, left, mid, right);
+            }
+        }
+    }
+    
+    return arr;
+}
+
+// Helper function for Tim Sort - Insertion Sort for a subarray
+async function insertionSortSubarray(arr, left, right) {
+    sendOperationUpdate('run-insertion', { 
+        left: left,
+        right: right,
+        description: `Sorting subarray from index ${left} to ${right} using insertion sort`
+    });
+    
+    for (let i = left + 1; i <= right; i++) {
+        if (state.status === 'stepping') {
+            await waitForStep();
+        } else if (state.status === 'paused') {
+            await waitIfPaused();
+        }
+        
+        const key = arrayAccess(arr, i);
+        
+        sendOperationUpdate('key-selection', { 
+            index: i,
+            value: key,
+            description: `Selected key at position ${i} with value ${key}`
+        });
+        
+        let j = i - 1;
+        while (j >= left) {
+            if (state.status === 'stepping') {
+                await waitForStep();
+            } else if (state.status === 'paused') {
+                await waitIfPaused();
+            }
+            
+            sendOperationUpdate('comparison', { 
+                indices: [j, i],
+                values: [arr[j], key],
+                description: `Comparing key ${key} with element ${arr[j]} at position ${j}`
+            });
+            
+            if (compare(arr[j], key) <= 0) {
+                break;
+            }
+            
+            // Move element one position ahead
+            arr[j + 1] = arr[j];
+            sendArrayUpdate(arr, [j, j + 1]);
+            
+            await delay(delayTime);
+            j--;
+        }
+        
+        arr[j + 1] = key;
+        sendArrayUpdate(arr, [j + 1]);
     }
 }
 
