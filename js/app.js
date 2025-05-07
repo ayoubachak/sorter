@@ -32,6 +32,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const stopSortBtn = document.getElementById('stopSortBtn');
     const stepBtn = document.getElementById('stepBtn');
     const viewModeButtons = document.querySelectorAll('.view-mode');
+    const soundToggleBtn = document.getElementById('soundToggle');
+    const soundToggleText = document.getElementById('soundToggleText');
+    const soundOnIcon = document.getElementById('soundOnIcon');
+    const soundOffIcon = document.getElementById('soundOffIcon');
     
     const comparisonsEl = document.getElementById('comparisons');
     const swapsEl = document.getElementById('swaps');
@@ -61,6 +65,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setupEventListeners();
         
         updateAlgorithmInfo(algorithmSelect.value);
+        
+        updateSoundToggleUI(sortingEngine.isSoundEnabled());
     }
     
     function registerCallbacks() {
@@ -105,6 +111,8 @@ document.addEventListener('DOMContentLoaded', () => {
         stopSortBtn.addEventListener('click', stopSorting);
         
         stepBtn.addEventListener('click', executeStep);
+        
+        soundToggleBtn.addEventListener('click', toggleSound);
         
         viewModeButtons.forEach(button => {
             button.addEventListener('click', () => {
@@ -226,6 +234,27 @@ document.addEventListener('DOMContentLoaded', () => {
         currentOperationEl.textContent = 'Sorting completed!';
         
         visualizer.applyEffect('wave');
+    }
+    
+    function toggleSound() {
+        const soundEnabled = sortingEngine.toggleSound();
+        updateSoundToggleUI(soundEnabled);
+    }
+    
+    function updateSoundToggleUI(enabled) {
+        if (enabled) {
+            soundToggleText.textContent = 'Sound On';
+            soundOnIcon.classList.remove('hidden');
+            soundOffIcon.classList.add('hidden');
+            soundToggleBtn.classList.add('bg-indigo-700');
+            soundToggleBtn.classList.remove('bg-gray-600');
+        } else {
+            soundToggleText.textContent = 'Sound Off';
+            soundOnIcon.classList.add('hidden');
+            soundOffIcon.classList.remove('hidden');
+            soundToggleBtn.classList.remove('bg-indigo-700');
+            soundToggleBtn.classList.add('bg-gray-600');
+        }
     }
     
     init();

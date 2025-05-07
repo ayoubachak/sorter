@@ -24,6 +24,7 @@ class SortingEngine {
         this.currentAlgorithm = null;
         this.worker = null;
         this.animationSpeed = 50; // 1-100
+        this.soundManager = new SoundManager(); // Initialize the sound manager
         this.callbacks = {
             onArrayUpdate: null,
             onMetricsUpdate: null,
@@ -165,12 +166,19 @@ class SortingEngine {
                     if (this.callbacks.onOperationUpdate) {
                         this.callbacks.onOperationUpdate(data.operation, data.details);
                     }
+                    
+                    // Play sounds based on operation type
+                    this.playSoundForOperation(data.operation, data.details);
                     break;
                     
                 case 'sorting_complete':
                     this.sortingState.inProgress = false;
                     this.sortingState.completed = true;
                     this.metrics.endTime = performance.now();
+                    
+                    // Play completion sound
+                    this.soundManager.playSound('completed', { volume: 0.6 });
+                    
                     if (this.callbacks.onSortingComplete) {
                         this.callbacks.onSortingComplete(this.metrics);
                     }
@@ -188,6 +196,58 @@ class SortingEngine {
                 stepMode: this.sortingState.stepMode
             }
         });
+    }
+    
+    /**
+     * Play sounds based on operation type
+     * @param {string} operation - Operation type
+     * @param {Object} details - Operation details
+     */
+    playSoundForOperation(operation, details) {
+        if (!this.soundManager.isSoundEnabled()) {
+            return;
+        }
+        
+        switch (operation) {
+            case 'comparison':
+                this.soundManager.playSound('comparison', { 
+                    volume: 0.2,
+                    // Higher pitch for higher values
+                    pitch: details.values && details.values.length === 2 
+                        ? 0.8 + Math.max(...details.values) / (this.array.length * 2)
+                        : 1
+                });
+                break;
+                
+            case 'swap':
+                this.soundManager.playSound('swap', {
+                    volume: 0.3,
+                    // Pitch based on distance between swapped elements
+                    pitch: details.indices && details.indices.length === 2
+                        ? 0.8 + Math.abs(details.indices[0] - details.indices[1]) / this.array.length
+                        : 1
+                });
+                break;
+                
+            case 'key-selection':
+            case 'insertion':
+                this.soundManager.playSound('insertion', {
+                    volume: 0.3,
+                    pitch: details.value 
+                        ? 0.8 + details.value / (Math.max(...this.array) * 1.5)
+                        : 1
+                });
+                break;
+                
+            case 'pivot-selection':
+                this.soundManager.playSound('pivot', {
+                    volume: 0.4,
+                    pitch: details.value 
+                        ? 0.8 + details.value / (Math.max(...this.array) * 1.5)
+                        : 1
+                });
+                break;
+        }
     }
     
     /**
@@ -284,6 +344,22 @@ class SortingEngine {
                 data: { speed }
             });
         }
+    }
+    
+    /**
+     * Toggle sound on/off
+     * @returns {boolean} - New sound state
+     */
+    toggleSound() {
+        return this.soundManager.toggleSound();
+    }
+    
+    /**
+     * Check if sound is enabled
+     * @returns {boolean} - Sound state
+     */
+    isSoundEnabled() {
+        return this.soundManager.isSoundEnabled();
     }
     
     /**
