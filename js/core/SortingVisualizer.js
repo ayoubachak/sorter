@@ -103,21 +103,34 @@ class SortingVisualizer {
      * @param {Array<number>} activeIndices - Indices of elements currently being processed
      * @param {Array<number>} sortedIndices - Indices of elements that are already sorted
      * @param {number} workerId - ID of the worker processing these elements (for multi-threading)
+     * @param {boolean} mergeOperation - Whether this is a merge operation
+     * @param {Object} workerStats - Additional worker statistics for visualization
      */
-    updateArray(array, activeIndices = [], sortedIndices = [], workerId = -1) {
+    updateArray(array, activeIndices = [], sortedIndices = [], workerId = -1, mergeOperation = false, workerStats = null) {
         this.array = array;
         this.maxValue = Math.max(...array);
         this.activeIndices = activeIndices;
         this.sortedIndices = sortedIndices;
         
         if (this.currentRenderer) {
-            // If a worker ID is provided, use that worker's color for highlighting
-            let highlightColor = undefined;
-            if (workerId >= 0 && workerId < this.workerColors.length) {
-                highlightColor = this.workerColors[workerId];
+            // If worker ID is provided with statistics, use updateWorkerActivity
+            if (workerId >= 0 && typeof this.currentRenderer.updateWorkerActivity === 'function') {
+                this.currentRenderer.updateWorkerActivity(workerId, activeIndices, array, workerStats);
             }
-            
-            this.currentRenderer.render(array, this.maxValue, activeIndices, sortedIndices, highlightColor);
+            // If this is a merge operation, use special merge visualization if available
+            else if (mergeOperation && typeof this.currentRenderer.updateMergeOperation === 'function') {
+                this.currentRenderer.updateMergeOperation(array, activeIndices);
+            }
+            // Otherwise use standard visualization
+            else {
+                // If a worker ID is provided, use that worker's color for highlighting
+                let highlightColor = undefined;
+                if (workerId >= 0 && workerId < this.workerColors.length) {
+                    highlightColor = this.workerColors[workerId];
+                }
+                
+                this.currentRenderer.render(array, this.maxValue, activeIndices, sortedIndices, highlightColor);
+            }
         }
     }
     
@@ -225,6 +238,26 @@ class SortingVisualizer {
         
         if (this.currentRenderer && typeof this.currentRenderer.cleanup === 'function') {
             this.currentRenderer.cleanup();
+        }
+    }
+    
+    /**
+     * Reset any worker-specific visualizations
+     * Call this when switching away from multi-threading or starting a new sort
+     */
+    resetWorkerVisualizations() {
+        // Reset our internal state
+        this.activeIndices = [];
+        this.sortedIndices = [];
+        
+        // If the current renderer supports worker state reset, call it
+        if (this.currentRenderer && typeof this.currentRenderer.resetWorkerState === 'function') {
+            this.currentRenderer.resetWorkerState();
+        }
+        
+        // Re-render the current array without any highlights or sorted indices
+        if (this.array.length > 0 && this.currentRenderer) {
+            this.currentRenderer.render(this.array, this.maxValue, [], []);
         }
     }
 }

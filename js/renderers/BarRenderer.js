@@ -26,15 +26,25 @@ class BarRenderer {
         // Store worker-specific indices and colors
         this.workerIndices = {};
         this.workerColors = [
-            '#e74c3c', // Red
-            '#2ecc71', // Green
-            '#3498db', // Blue
-            '#f39c12', // Orange
-            '#9b59b6', // Purple
-            '#1abc9c', // Turquoise
-            '#d35400', // Pumpkin
-            '#34495e'  // Dark Blue
+            'rgba(231, 76, 60, 0.9)',   // Red
+            'rgba(46, 204, 113, 0.9)',  // Green
+            'rgba(52, 152, 219, 0.9)',  // Blue
+            'rgba(243, 156, 18, 0.9)',  // Orange
+            'rgba(155, 89, 182, 0.9)',  // Purple
+            'rgba(26, 188, 156, 0.9)',  // Turquoise
+            'rgba(211, 84, 0, 0.9)',    // Pumpkin
+            'rgba(52, 73, 94, 0.9)'     // Dark Blue
         ];
+        
+        // Store highlighted worker for more prominent display
+        this.highlightedWorker = null;
+        this.highlightTime = 0;
+        
+        // Store worker statistics and progress
+        this.workerStats = {};
+        this.workerProgress = {};
+        this.workerActivity = {};
+        this.workerRegions = {};
         
         this.colorScheme = {
             background: '#f8f9fa',
@@ -67,6 +77,27 @@ class BarRenderer {
         
         // Initial render
         this.clear();
+        
+        // Set up animation loop for worker highlights
+        this.animateWorkerHighlights();
+    }
+    
+    /**
+     * Animate worker highlights for better visibility
+     */
+    animateWorkerHighlights() {
+        const animate = () => {
+            this.highlightTime = (this.highlightTime + 1) % 100;
+            
+            // Only re-render if we have active workers
+            if (Object.keys(this.workerIndices).length > 0) {
+                this.render(this.array, this.maxValue, this.activeIndices, this.sortedIndices);
+            }
+            
+            requestAnimationFrame(animate);
+        };
+        
+        requestAnimationFrame(animate);
     }
     
     /**
@@ -95,6 +126,27 @@ class BarRenderer {
         // If this is a worker update, store the indices for that worker
         if (workerId !== null) {
             this.workerIndices[workerId] = activeIndices;
+            this.highlightedWorker = workerId; // Highlight this worker temporarily
+            
+            // Update worker activity timestamp
+            this.workerActivity[workerId] = Date.now();
+            
+            // If we get a new set of indices, try to determine worker's responsible region
+            if (activeIndices && activeIndices.length > 0) {
+                if (!this.workerRegions[workerId]) {
+                    // Make an initial guess at the worker's region based on active indices
+                    const minIdx = Math.min(...activeIndices);
+                    const maxIdx = Math.max(...activeIndices);
+                    
+                    // If the range is significant, store it as the worker's region
+                    if (maxIdx - minIdx > array.length / 20) {
+                        this.workerRegions[workerId] = {
+                            start: Math.max(0, minIdx - 5),
+                            end: Math.min(array.length - 1, maxIdx + 5)
+                        };
+                    }
+                }
+            }
         }
         
         // Clear the canvas
@@ -102,6 +154,9 @@ class BarRenderer {
         
         const barWidth = this.width / array.length;
         const barHeightMultiplier = this.height / (maxValue || 1);
+        
+        // First, draw worker region indicators at the top if we have them
+        this.drawWorkerRegions(barWidth);
         
         // Draw each bar
         for (let i = 0; i < array.length; i++) {
@@ -112,6 +167,8 @@ class BarRenderer {
             
             // Determine the color based on the element state
             let barColor;
+            let borderColor = null;
+            let glowEffect = false;
             
             if (mergeOperation && activeIndices.includes(i)) {
                 // For merge operations, use special colors
@@ -119,36 +176,94 @@ class BarRenderer {
                     barColor = this.colorScheme.mergeSource; // Source element
                 } else if (i === activeIndices[1]) {
                     barColor = this.colorScheme.mergeTarget; // Target element
+                } else {
+                    barColor = this.colorScheme.mergeTarget; // Other merge elements
                 }
+                glowEffect = true;
             } else if (activeIndices.includes(i)) {
                 // Use active color or worker-specific color if available
                 barColor = workerId !== null && workerId >= 0 ? 
                     this.workerColors[workerId % this.workerColors.length] : 
                     this.colorScheme.active;
+                glowEffect = true;
             } else if (sortedIndices.includes(i)) {
                 barColor = this.colorScheme.sorted;
             } else {
                 // Check if this index is part of any worker's active set
                 let isPartOfWorker = false;
+                let workerForThisIndex = null;
+                
                 for (const wId in this.workerIndices) {
                     if (this.workerIndices[wId].includes(i)) {
-                        barColor = this.workerColors[wId % this.workerColors.length];
+                        const workerNum = parseInt(wId);
+                        workerForThisIndex = workerNum;
+                        barColor = this.workerColors[workerNum % this.workerColors.length];
+                        
+                        // Add pulsing effect to the current worker's bars
+                        if (this.highlightedWorker !== null && parseInt(wId) === this.highlightedWorker) {
+                            // Calculate pulsing opacity based on time
+                            const pulseOpacity = 0.7 + 0.3 * Math.sin(this.highlightTime * 0.1);
+                            barColor = this.adjustOpacity(barColor, pulseOpacity);
+                            borderColor = '#ffffff';
+                            glowEffect = true;
+                        }
+                        
                         isPartOfWorker = true;
                         break;
                     }
                 }
                 
-                // If not part of any worker, use the default gradient
+                // Check if the element is part of a worker's region
                 if (!isPartOfWorker) {
+                    for (const wId in this.workerRegions) {
+                        const region = this.workerRegions[wId];
+                        if (i >= region.start && i <= region.end) {
+                            const workerNum = parseInt(wId);
+                            
+                            // Use a lighter version of the worker's color for the region
+                            const baseColor = this.workerColors[workerNum % this.workerColors.length];
+                            barColor = this.adjustOpacity(baseColor, 0.3);
+                            
+                            // Only override if no specific worker has claimed this index
+                            if (!workerForThisIndex) {
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // If not part of any worker, use the default gradient
+                if (!isPartOfWorker && !barColor) {
                     const normalizedValue = value / (maxValue || 1);
                     const hue = 210 + normalizedValue * 60; // Blue to purple gradient
                     barColor = `hsl(${hue}, 70%, 50%)`;
                 }
             }
             
+            // Add glow effect to active elements
+            if (glowEffect) {
+                // Draw a glow around active bars
+                const glow = this.ctx.createRadialGradient(
+                    x + barWidth/2, y + barHeight/2, 0,
+                    x + barWidth/2, y + barHeight/2, barWidth * 2
+                );
+                glow.addColorStop(0, barColor);
+                glow.addColorStop(1, 'rgba(255,255,255,0)');
+                
+                this.ctx.fillStyle = glow;
+                this.ctx.fillRect(x - barWidth/2, y - barHeight/4, barWidth * 2, barHeight * 1.5);
+            }
+            
             // Draw the bar with a small gap between bars
             this.ctx.fillStyle = barColor;
             this.ctx.fillRect(x + 1, y, barWidth - 2, barHeight);
+            
+            // Add border if specified
+            if (borderColor) {
+                this.ctx.strokeStyle = borderColor;
+                this.ctx.lineWidth = 2;
+                this.ctx.strokeRect(x + 1, y, barWidth - 2, barHeight);
+            }
             
             // Draw value text for larger arrays
             if (array.length <= 50) {
@@ -171,43 +286,172 @@ class BarRenderer {
     }
     
     /**
+     * Adjust the opacity of a color
+     * @param {string} color - CSS color string
+     * @param {number} opacity - New opacity value (0-1)
+     * @returns {string} - Adjusted color
+     */
+    adjustOpacity(color, opacity) {
+        if (color.startsWith('rgba')) {
+            // Extract the RGB parts and replace the opacity
+            const parts = color.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*[\d\.]+\)/);
+            if (parts) {
+                return `rgba(${parts[1]}, ${parts[2]}, ${parts[3]}, ${opacity})`;
+            }
+        } else if (color.startsWith('rgb')) {
+            // Convert RGB to RGBA
+            const parts = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+            if (parts) {
+                return `rgba(${parts[1]}, ${parts[2]}, ${parts[3]}, ${opacity})`;
+            }
+        }
+        
+        // Default fallback
+        return color;
+    }
+    
+    /**
      * Draw color legends for all active workers
      */
     drawWorkerLegends() {
-        const legendWidth = 100;
-        const legendHeight = 25;
+        const legendWidth = 140;
+        const legendHeight = 30;
         const padding = 10;
-        const spacing = 5;
+        const spacing = 2;
+        
+        // Count active workers
+        const activeWorkers = Object.keys(this.workerIndices).filter(id => 
+            this.workerActivity[id] && Date.now() - this.workerActivity[id] < 2000
+        );
         
         // Background for all legends
-        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        const totalHeight = (activeWorkers.length * (legendHeight + spacing)) + padding * 2;
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         this.ctx.fillRect(
             this.width - legendWidth - padding, 
             padding, 
             legendWidth, 
-            (Object.keys(this.workerIndices).length * (legendHeight + spacing)) + spacing
+            totalHeight
+        );
+        
+        // Draw outer border
+        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(
+            this.width - legendWidth - padding, 
+            padding, 
+            legendWidth,
+            totalHeight
         );
         
         // Draw a legend for each worker
-        let yOffset = padding + spacing;
-        for (const workerId in this.workerIndices) {
-            // Worker color sample
-            this.ctx.fillStyle = this.workerColors[workerId % this.workerColors.length];
+        let yOffset = padding + spacing * 2;
+        for (const workerId of activeWorkers) {
+            const workerNum = parseInt(workerId);
+            
+            // Worker color sample with pulsing effect if it's the highlighted worker
+            let workerColor = this.workerColors[workerNum % this.workerColors.length];
+            let borderColor = null;
+            const isHighlighted = this.highlightedWorker !== null && workerNum === this.highlightedWorker;
+            
+            if (isHighlighted) {
+                // Calculate pulsing opacity for the legend
+                const pulseOpacity = 0.7 + 0.3 * Math.sin(this.highlightTime * 0.1);
+                workerColor = this.adjustOpacity(workerColor, pulseOpacity);
+                borderColor = '#ffffff';
+                
+                // Add glow effect to highlighted worker
+                const centerX = this.width - legendWidth - padding + 15;
+                const centerY = yOffset + 12;
+                const glow = this.ctx.createRadialGradient(
+                    centerX, centerY, 0,
+                    centerX, centerY, 25
+                );
+                glow.addColorStop(0, workerColor);
+                glow.addColorStop(1, 'rgba(255,255,255,0)');
+                
+                this.ctx.fillStyle = glow;
+                this.ctx.fillRect(
+                    centerX - 15, 
+                    centerY - 12, 
+                    30, 
+                    24
+                );
+            }
+            
+            // Worker color box
+            this.ctx.fillStyle = workerColor;
             this.ctx.fillRect(
-                this.width - legendWidth - padding + 10, 
+                this.width - legendWidth - padding + 5, 
                 yOffset, 
                 20, 
                 legendHeight - 10
             );
             
+            // Add a border for the worker box
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            this.ctx.lineWidth = 1;
+            this.ctx.strokeRect(
+                this.width - legendWidth - padding + 5, 
+                yOffset, 
+                20, 
+                legendHeight - 10
+            );
+            
+            // Draw activity indicator
+            const lastActivity = this.workerActivity[workerId] || 0;
+            const timeSinceActivity = Date.now() - lastActivity;
+            
+            if (timeSinceActivity < 500) {
+                // Recent activity - show animated indicator
+                const activityDot = 3 + Math.sin(this.highlightTime * 0.2) * 2;
+                this.ctx.beginPath();
+                this.ctx.arc(
+                    this.width - legendWidth - padding + 30,
+                    yOffset + legendHeight/2 - 5,
+                    activityDot,
+                    0,
+                    Math.PI * 2
+                );
+                this.ctx.fillStyle = '#4CAF50'; // Green dot
+                this.ctx.fill();
+            } else if (timeSinceActivity < 2000) {
+                // Somewhat recent activity - static indicator
+                this.ctx.beginPath();
+                this.ctx.arc(
+                    this.width - legendWidth - padding + 30,
+                    yOffset + legendHeight/2 - 5,
+                    3,
+                    0,
+                    Math.PI * 2
+                );
+                this.ctx.fillStyle = '#FFC107'; // Yellow dot
+                this.ctx.fill();
+            }
+            
             // Worker text
-            this.ctx.fillStyle = '#333';
-            this.ctx.font = '12px Arial';
+            this.ctx.fillStyle = '#fff';
+            this.ctx.font = '10px Arial';
             this.ctx.textAlign = 'left';
+            
+            const region = this.workerRegions[workerId];
+            const regionText = region ? 
+                `[${region.start}...${region.end}]` : 
+                'array section';
+                
             this.ctx.fillText(
                 `Worker ${workerId}`, 
-                this.width - legendWidth - padding + 40, 
-                yOffset + 15
+                this.width - legendWidth - padding + 35, 
+                yOffset + 10
+            );
+            
+            // Worker region info
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            this.ctx.font = '8px Arial';
+            this.ctx.fillText(
+                regionText,
+                this.width - legendWidth - padding + 35,
+                yOffset + 22
             );
             
             yOffset += legendHeight + spacing;
@@ -297,24 +541,120 @@ class BarRenderer {
      * @param {number} workerId - Worker ID
      * @param {Array<number>} indices - Indices being processed by the worker
      * @param {Array<number>} array - Current array state (optional)
+     * @param {Object} stats - Worker statistics (optional)
      */
-    updateWorkerActivity(workerId, indices, array = null) {
+    updateWorkerActivity(workerId, indices, array = null, stats = null) {
         if (!indices || indices.length === 0) {
-            // Clear this worker's indices if none provided
-            delete this.workerIndices[workerId];
+            // Don't clear worker indices anymore - we'll keep them for visualization
+            // Just update the activity time to show the worker is still active
+            this.workerActivity[workerId] = Date.now();
         } else {
             // Store these indices for this worker
             this.workerIndices[workerId] = indices;
+            this.workerActivity[workerId] = Date.now();
+            
+            // Update region if we have a better understanding
+            if (indices.length > 1) {
+                const minIdx = Math.min(...indices);
+                const maxIdx = Math.max(...indices);
+                
+                // If we got a larger region than previously detected, update it
+                if (!this.workerRegions[workerId] || 
+                    (maxIdx - minIdx > 5 && 
+                     (minIdx < this.workerRegions[workerId].start || 
+                      maxIdx > this.workerRegions[workerId].end))) {
+                    
+                    this.workerRegions[workerId] = {
+                        start: Math.max(0, minIdx - 2),
+                        end: Math.min(this.array.length - 1, maxIdx + 2)
+                    };
+                }
+            }
+            
+            // Update worker stats if provided
+            if (stats) {
+                this.workerStats[workerId] = stats;
+                
+                // If progress info is present, store it
+                if (stats.progress !== undefined) {
+                    this.workerProgress[workerId] = stats.progress;
+                }
+                
+                // Update worker animation based on operation type
+                if (stats.operation) {
+                    // Store the operation type to visualize differently
+                    this.workerOperations = this.workerOperations || {};
+                    this.workerOperations[workerId] = stats.operation;
+                }
+            }
         }
         
         // If array is provided, update our array state
         if (array) {
-            // Update the entire array if provided
-            this.array = [...array];
+            // Update just the portion of the array this worker is responsible for
+            const region = this.workerRegions[workerId];
+            if (region && this.array.length === array.length) {
+                for (let i = region.start; i <= region.end; i++) {
+                    this.array[i] = array[i];
+                }
+            } else {
+                // Update the entire array if provided and we don't have region info
+                this.array = [...array];
+            }
         }
+        
+        // Highlight this worker temporarily
+        this.highlightedWorker = workerId;
         
         // Render with current active indices, but pass the worker ID
         this.render(this.array, this.maxValue, this.activeIndices, this.sortedIndices, workerId);
+        
+        // Draw progress bar for this worker if we have progress info
+        if (this.workerProgress[workerId] !== undefined) {
+            this.drawWorkerProgress(workerId, this.workerProgress[workerId]);
+        }
+    }
+    
+    /**
+     * Draw progress bar for a specific worker
+     * @param {number} workerId - Worker ID
+     * @param {number} progress - Progress percentage (0-100)
+     */
+    drawWorkerProgress(workerId, progress) {
+        if (progress === undefined || progress < 0 || progress > 100) return;
+        
+        const region = this.workerRegions[workerId];
+        if (!region) return;
+        
+        const barWidth = this.width / this.array.length;
+        const startX = region.start * barWidth;
+        const endX = (region.end + 1) * barWidth;
+        const width = endX - startX;
+        
+        // Draw progress bar below the region indicator
+        const progressHeight = 3;
+        const y = 18; // Just below the region indicator
+        
+        // Background
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        this.ctx.fillRect(startX, y, width, progressHeight);
+        
+        // Progress fill
+        const progressWidth = (progress / 100) * width;
+        this.ctx.fillStyle = this.workerColors[workerId % this.workerColors.length];
+        this.ctx.fillRect(startX, y, progressWidth, progressHeight);
+        
+        // Show percentage text for wider regions
+        if (width > 40) {
+            this.ctx.fillStyle = '#fff';
+            this.ctx.font = '8px Arial';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText(
+                `${Math.round(progress)}%`,
+                startX + width / 2,
+                y + progressHeight + 8
+            );
+        }
     }
     
     /**
@@ -630,6 +970,145 @@ class BarRenderer {
      */
     cleanup() {
         // Nothing specific to clean up for Canvas-based rendering
+    }
+    
+    /**
+     * Draw worker region indicators at the top of the visualization
+     * @param {number} barWidth - Width of each bar
+     */
+    drawWorkerRegions(barWidth) {
+        const regionHeight = 15;
+        const padding = 2;
+        
+        for (const workerId in this.workerRegions) {
+            const region = this.workerRegions[workerId];
+            const workerNum = parseInt(workerId);
+            const workerColor = this.workerColors[workerNum % this.workerColors.length];
+            
+            // Calculate region position
+            const startX = region.start * barWidth;
+            const endX = (region.end + 1) * barWidth;
+            const width = endX - startX;
+            
+            // Draw region background
+            this.ctx.fillStyle = this.adjustOpacity(workerColor, 0.3);
+            this.ctx.fillRect(startX, 0, width, regionHeight);
+            
+            // Draw animated border for active worker
+            if (this.highlightedWorker !== null && parseInt(workerId) === this.highlightedWorker) {
+                this.ctx.strokeStyle = this.adjustOpacity(workerColor, 0.8 + 0.2 * Math.sin(this.highlightTime * 0.1));
+                this.ctx.lineWidth = 2;
+                this.ctx.strokeRect(startX, 0, width, regionHeight);
+                
+                // Add label with worker number
+                this.ctx.fillStyle = '#333';
+                this.ctx.font = '10px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText(`Worker ${workerId}`, startX + width/2, regionHeight - 4);
+            } else {
+                // For non-highlighted workers, still show a lighter label
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                this.ctx.font = '9px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText(`W${workerId}`, startX + width/2, regionHeight - 4);
+            }
+            
+            // Check if this worker was recently active
+            const now = Date.now();
+            const lastActivity = this.workerActivity[workerId] || 0;
+            
+            // Get the current operation if available
+            const workerOp = this.workerOperations && this.workerOperations[workerId];
+            let operationIndicator = '';
+            let operationColor = '#fff';
+            
+            if (workerOp) {
+                // Create a visual indicator of what operation is happening
+                switch(workerOp) {
+                    case 'comparison':
+                        operationIndicator = 'C';
+                        operationColor = '#64B5F6'; // Light blue
+                        break;
+                    case 'swap':
+                        operationIndicator = 'S';
+                        operationColor = '#FFD54F'; // Amber
+                        break;
+                    case 'merge':
+                        operationIndicator = 'M';
+                        operationColor = '#81C784'; // Light green
+                        break;
+                    case 'partition':
+                        operationIndicator = 'P';
+                        operationColor = '#BA68C8'; // Purple
+                        break;
+                    default:
+                        operationIndicator = '•';
+                        operationColor = '#fff';
+                }
+            }
+            
+            if (now - lastActivity < 500) { // Activity within last 500ms
+                // Draw activity indicator with operation type
+                if (operationIndicator) {
+                    const pulseSize = 9 + 2 * Math.sin(this.highlightTime * 0.2);
+                    
+                    // Draw operation background
+                    this.ctx.beginPath();
+                    this.ctx.arc(startX + 15, regionHeight/2, pulseSize, 0, Math.PI * 2);
+                    this.ctx.fillStyle = operationColor;
+                    this.ctx.fill();
+                    
+                    // Draw operation text
+                    this.ctx.fillStyle = '#000';
+                    this.ctx.font = 'bold 9px Arial';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.fillText(operationIndicator, startX + 15, regionHeight/2 + 3);
+                } else {
+                    // Simple activity indicator without operation info
+                    const pulseRadius = 3 + 2 * Math.sin(this.highlightTime * 0.2);
+                    
+                    this.ctx.beginPath();
+                    this.ctx.arc(startX + 10, regionHeight/2, pulseRadius, 0, Math.PI * 2);
+                    this.ctx.fillStyle = '#fff';
+                    this.ctx.fill();
+                }
+            } else if (now - lastActivity < 2000 && operationIndicator) { // Recent activity with known operation
+                // Draw static operation indicator
+                this.ctx.beginPath();
+                this.ctx.arc(startX + 15, regionHeight/2, 8, 0, Math.PI * 2);
+                this.ctx.fillStyle = this.adjustOpacity(operationColor, 0.7);
+                this.ctx.fill();
+                
+                // Draw operation text
+                this.ctx.fillStyle = '#000';
+                this.ctx.font = 'bold 8px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText(operationIndicator, startX + 15, regionHeight/2 + 3);
+            }
+        }
+    }
+    
+    /**
+     * Reset all worker state for clean visualization
+     */
+    resetWorkerState() {
+        // Clear all worker-related state
+        this.workerIndices = {};
+        this.workerProgress = {};
+        this.workerActivity = {};
+        this.workerRegions = {};
+        this.workerStats = {};
+        this.workerOperations = {};
+        this.highlightedWorker = null;
+        
+        // Also reset any other visualization states
+        this.sortedIndices = [];
+        this.activeIndices = [];
+        
+        // Redraw the array with clean state
+        if (this.array && this.array.length > 0) {
+            this.render(this.array, this.maxValue, [], []);
+        }
     }
 }
 

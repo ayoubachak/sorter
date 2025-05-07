@@ -110,6 +110,16 @@ function initializeMergeSortThreads(array, threadCount) {
         const end = Math.min(start + partitionSize, n);
         workerState.subArrays[i] = array.slice(start, end);
         workerState.workerRanges[i] = { start, end: end - 1 };
+        
+        // Visualize each worker's initial partition - highlight the entire partition
+        const partitionIndices = Array.from(
+            { length: end - start }, 
+            (_, idx) => start + idx
+        );
+        sendWorkerVisualUpdate(i, partitionIndices);
+        
+        // Add a small delay for visual effect
+        setTimeout(() => {}, 50);
     }
     
     // Initialize workers
@@ -206,6 +216,17 @@ function initializeQuickSortThreads(array, threadCount) {
             start: startIdx, 
             end: startIdx + partitionSize - 1 
         };
+        
+        // Visualize each worker's initial partition - highlight the entire partition
+        const partitionIndices = Array.from(
+            { length: partitionSize }, 
+            (_, idx) => startIdx + idx
+        );
+        sendWorkerVisualUpdate(i, partitionIndices);
+        
+        // Add a small delay for visual effect
+        setTimeout(() => {}, 50);
+        
         startIdx += partitionSize;
     }
     
@@ -265,6 +286,16 @@ function initializeTimSortThreads(array, threadCount) {
         const end = Math.min(start + partitionSize, n);
         workerState.subArrays[i] = array.slice(start, end);
         workerState.workerRanges[i] = { start, end: end - 1 };
+        
+        // Visualize each worker's initial partition - highlight the entire partition
+        const partitionIndices = Array.from(
+            { length: end - start }, 
+            (_, idx) => start + idx
+        );
+        sendWorkerVisualUpdate(i, partitionIndices);
+        
+        // Add a small delay for visual effect
+        setTimeout(() => {}, 50);
     }
     
     // Initialize workers
@@ -337,6 +368,16 @@ function initializeRadixSortThreads(array, threadCount) {
         const end = Math.min(start + partitionSize, n);
         workerState.subArrays[i] = array.slice(start, end);
         workerState.workerRanges[i] = { start, end: end - 1 };
+        
+        // Visualize each worker's initial partition - highlight the entire partition
+        const partitionIndices = Array.from(
+            { length: end - start }, 
+            (_, idx) => start + idx
+        );
+        sendWorkerVisualUpdate(i, partitionIndices);
+        
+        // Add a small delay for visual effect
+        setTimeout(() => {}, 50);
     }
     
     // Initialize workers
@@ -585,10 +626,11 @@ function mergeResults() {
  * @param {Array<Array>} sortedArrays - The sorted subarrays to merge
  */
 async function visualizeMerging(sortedArrays) {
-    const mergeDelay = workerState.workerDelay * 2; // Slow down merging for visibility
+    // Use a much faster merge delay for better performance
+    const mergeDelay = Math.min(10, workerState.workerDelay / 4);
     
     sendOperationUpdate('merging-visualization', {
-        description: `Visualizing the merging of ${sortedArrays.length} sorted subarrays`
+        description: `Merging ${sortedArrays.length} sorted subarrays`
     });
     
     // Use a clone of the original array to build up our result
@@ -608,52 +650,68 @@ async function visualizeMerging(sortedArrays) {
         startIdx += sortedArrays[i].length;
     }
     
+    // Batch merge operations for more efficient visualization
+    // This will make the merge phase much faster
+    const batchSize = Math.max(5, Math.floor(totalElements / 100));
+    
     // Perform merge with visualization
-    for (let resultIdx = 0; resultIdx < totalElements; resultIdx++) {
-        let minValue = Infinity;
-        let minArrayIdx = -1;
+    for (let resultIdx = 0; resultIdx < totalElements;) {
+        let batchIndices = [];
+        let batchEndsAt = Math.min(resultIdx + batchSize, totalElements);
         
-        // Find the minimum value across all arrays
-        for (let i = 0; i < sortedArrays.length; i++) {
-            if (pointers[i] < sortedArrays[i].length) {
-                const value = sortedArrays[i][pointers[i]];
-                if (value < minValue) {
-                    minValue = value;
-                    minArrayIdx = i;
+        // Process a batch of elements
+        while (resultIdx < batchEndsAt) {
+            let minValue = Infinity;
+            let minArrayIdx = -1;
+            
+            // Find the minimum value across all arrays
+            for (let i = 0; i < sortedArrays.length; i++) {
+                if (pointers[i] < sortedArrays[i].length) {
+                    const value = sortedArrays[i][pointers[i]];
+                    if (value < minValue) {
+                        minValue = value;
+                        minArrayIdx = i;
+                    }
                 }
+            }
+            
+            // If we found a minimum, add it to the result array
+            if (minArrayIdx !== -1) {
+                // Calculate the global position for this element
+                const globalPosition = globalStartIndices[minArrayIdx] + pointers[minArrayIdx];
+                
+                // Update result array
+                resultArray[resultIdx] = minValue;
+                
+                // Track this index for visualization
+                batchIndices.push(resultIdx);
+                
+                // Increment the pointer for the array we took from
+                pointers[minArrayIdx]++;
+                resultIdx++;
+            } else {
+                // No more elements to merge
+                break;
             }
         }
         
-        // If we found a minimum, add it to the result array
-        if (minArrayIdx !== -1) {
-            // Calculate the global position for this element
-            const globalPosition = globalStartIndices[minArrayIdx] + pointers[minArrayIdx];
-            
-            // Update result array
-            resultArray[resultIdx] = minValue;
-            
-            // Visualize this merge step
+        // Visualize this batch of merged elements
+        if (batchIndices.length > 0) {
             sendOperationUpdate('merge-step', {
-                description: `Merging element ${minValue} from worker ${minArrayIdx} to position ${resultIdx}`
+                description: `Merged ${batchIndices.length} elements`
             });
             
-            // Highlight both the source and destination positions
-            const indicesToHighlight = [globalPosition, resultIdx];
-            
-            // Send visual update
+            // Send visual update for this batch
             self.postMessage({
                 type: 'array_update',
                 data: {
                     array: resultArray,
-                    indices: indicesToHighlight,
+                    indices: batchIndices,
                     mergeOperation: true
                 }
             });
             
-            // Increment the pointer for the array we took from
-            pointers[minArrayIdx]++;
-            
-            // Add delay for visualization
+            // Brief delay between batches
             await delayPromise(mergeDelay);
         }
     }

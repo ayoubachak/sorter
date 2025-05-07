@@ -312,16 +312,22 @@ async function startSorting(algorithm, inputArray, speed, stepMode = false) {
     animationSpeed = speed;
     delayTime = Math.max(10, 1000 / (speed * speed * 0.01));
     
-    state.status = stepMode ? 'stepping' : 'running';
-    state.operationCount = 0;
-    state.awaitingStep = stepMode;
+    // Completely reset state
+    state = {
+        status: stepMode ? 'stepping' : 'running',
+        operationCount: 0,
+        maxOperationsPerStep: 1,
+        awaitingStep: stepMode
+    };
     
+    // Reset all metrics
     metrics = {
         comparisons: 0,
         swaps: 0,
         accesses: 0
     };
     
+    // Send initial state updates
     sendArrayUpdate(array);
     sendMetricsUpdate();
     

@@ -31,7 +31,8 @@ async function startSorting(data) {
     state.workerId = workerId;
     state.array = [...array];
     state.algorithm = algorithm;
-    state.workerDelay = Math.max(10, workerDelay || 50);
+    // Ensure workers are fast but visible
+    state.workerDelay = Math.min(30, Math.max(5, workerDelay || 20));
     state.metrics = { comparisons: 0, swaps: 0, accesses: 0 };
     state.totalOperations = 0;
     state.activeIndices = [];
@@ -56,14 +57,21 @@ async function startSorting(data) {
             state.estimatedTotalOperations = n * n; // Default case
     }
     
-    // Send initial visualization update
-    sendVisualizationUpdate([0, Math.min(array.length - 1, 5)]);
+    // Make workers more visible by highlighting their entire range at start
+    const rangeSize = Math.min(array.length, 10);
+    const rangeMid = Math.floor(array.length / 2);
+    const rangeStart = Math.max(0, rangeMid - Math.floor(rangeSize / 2));
+    const indices = Array.from({ length: rangeSize }, (_, i) => rangeStart + i);
+    sendVisualizationUpdate(indices);
     
     // Notify that we're ready
     self.postMessage({
         type: 'ready',
         data: { workerId }
     });
+    
+    // First, send a full array update to show initial worker state
+    sendFullArrayUpdate(state.array);
     
     // Sort the array based on algorithm
     try {
@@ -136,8 +144,23 @@ function delayPromise(ms) {
 async function applyDelay() {
     if (state.workerDelay > 0) {
         // Use a very small delay to keep visualization responsive
-        await delayPromise(Math.min(20, state.workerDelay));
+        await delayPromise(Math.min(10, state.workerDelay));
     }
+}
+
+/**
+ * Send full array update to show worker activity
+ * @param {Array} array - The current array state
+ */
+function sendFullArrayUpdate(array) {
+    self.postMessage({
+        type: 'worker_visual_update',
+        data: {
+            workerId: state.workerId,
+            indices: Array.from({ length: array.length }, (_, i) => i),
+            array: array
+        }
+    });
 }
 
 /**
@@ -213,7 +236,18 @@ function updateActiveIndices(indices) {
     if (!indices || indices.length === 0) return;
     
     state.activeIndices = [...indices];
-    sendVisualizationUpdate(indices);
+    
+    // Add neighboring elements for better visibility of worker activity
+    const expanded = [...indices];
+    indices.forEach(idx => {
+        if (idx > 0 && !expanded.includes(idx-1)) expanded.push(idx-1);
+        if (idx < state.array.length-1 && !expanded.includes(idx+1)) expanded.push(idx+1);
+    });
+    
+    sendVisualizationUpdate(expanded);
+    
+    // Send progress update more frequently to make workers more visible
+    updateProgress();
 }
 
 /**
@@ -222,12 +256,41 @@ function updateActiveIndices(indices) {
 function sendVisualizationUpdate(indices) {
     if (!indices || indices.length === 0) return;
     
+    // Determine the current operation the worker is performing
+    let currentOperation = 'processing';
+    
+    if (state.metrics.comparisons > 0 && state.metrics.comparisons > state.metrics.swaps * 2) {
+        currentOperation = 'comparison';
+    } else if (state.metrics.swaps > 0) {
+        currentOperation = 'swap';
+    }
+    
+    // For merge sort, detect merge operation
+    if (state.algorithm === 'merge' && 
+        indices.length > 2 && 
+        Math.max(...indices) - Math.min(...indices) > 10) {
+        currentOperation = 'merge';
+    }
+    
+    // For quick sort, detect partition operation
+    if (state.algorithm === 'quick' && 
+        indices.length > 1 && 
+        state.metrics.comparisons > 0 && 
+        state.metrics.swaps > 0) {
+        currentOperation = 'partition';
+    }
+    
     self.postMessage({
         type: 'worker_visual_update',
         data: {
             workerId: state.workerId,
             indices: indices,
-            array: state.array // Include current array state
+            array: state.array, // Include current array state
+            stats: {
+                operation: currentOperation,
+                metrics: { ...state.metrics },
+                activeIndices: indices
+            }
         }
     });
 }
@@ -245,6 +308,22 @@ function updateProgress() {
     // Include current operation type in the progress update for better visualization
     const currentOperation = state.metrics.comparisons > state.metrics.swaps ? 'comparison' : 'swap';
     
+    // Calculate additional metrics for visualization
+    const currentActivityIntensity = Math.min(
+        100, 
+        state.totalOperations > 0 ? 
+            Math.floor((state.totalOperations % 100) / 100 * 100) : 0
+    );
+    
+    // For visualizing worker activity, we need to determine the "focus region"
+    // This gives us the most active part of the array the worker is currently operating on
+    let focusRegion = {};
+    if (state.activeIndices && state.activeIndices.length > 0) {
+        const min = Math.min(...state.activeIndices);
+        const max = Math.max(...state.activeIndices);
+        focusRegion = { min, max };
+    }
+    
     // Also send current array state for visualization
     self.postMessage({
         type: 'progress',
@@ -254,7 +333,14 @@ function updateProgress() {
             metrics: { ...state.metrics }, // Include current metrics
             operation: currentOperation,
             array: state.array, // Include current array state
-            activeIndices: state.activeIndices
+            activeIndices: state.activeIndices,
+            stats: {
+                progress: progressPercent,
+                operation: currentOperation,
+                intensity: currentActivityIntensity,
+                focusRegion: focusRegion,
+                metrics: { ...state.metrics }
+            }
         }
     });
     

@@ -35,7 +35,8 @@ class SortingEngine {
             onMetricsUpdate: null,
             onOperationUpdate: null,
             onSortingComplete: null,
-            onStepComplete: null
+            onStepComplete: null,
+            onResetWorkerVisualizations: null
         };
     }
     
@@ -51,6 +52,11 @@ class SortingEngine {
         
         this.array = this.generateArray(size, distribution);
         this.originalArray = [...this.array];
+        
+        // Reset any worker visualizations 
+        if (this.callbacks.onResetWorkerVisualizations) {
+            this.callbacks.onResetWorkerVisualizations();
+        }
         
         if (this.callbacks.onArrayUpdate) {
             this.callbacks.onArrayUpdate(this.array);
@@ -119,9 +125,18 @@ class SortingEngine {
             return; // Already running
         }
         
-        if (this.state.status === 'completed') {
-            this.array = [...this.originalArray]; // Reset array
-            this.resetMetrics();
+        // Completely reset state from previous sorting, even if already completed
+        this.array = [...this.originalArray]; // Reset array
+        this.resetMetrics();
+        
+        // Reset any worker visualizations from previous sorting
+        if (this.callbacks.onResetWorkerVisualizations) {
+            this.callbacks.onResetWorkerVisualizations();
+        }
+        
+        // Explicitly notify that we're starting fresh with no sorted indices
+        if (this.callbacks.onArrayUpdate) {
+            this.callbacks.onArrayUpdate(this.array, [], [], -1, false, null);
         }
         
         this.currentAlgorithm = algorithmName;
@@ -173,6 +188,9 @@ class SortingEngine {
             this.worker.terminate();
         }
         
+        // Ensure fresh array copy before starting
+        this.array = [...this.originalArray];
+        
         // Create a new worker
         this.worker = new Worker('js/algorithms/algorithmWorker.js');
         
@@ -212,6 +230,11 @@ class SortingEngine {
                     
                     // Play completion sound
                     this.soundManager.playSound('completed', { volume: 0.6 });
+                    
+                    // Reset worker visualizations to clean up the UI
+                    if (this.callbacks.onResetWorkerVisualizations) {
+                        this.callbacks.onResetWorkerVisualizations();
+                    }
                     
                     if (this.callbacks.onSortingComplete) {
                         this.callbacks.onSortingComplete(this.metrics);
@@ -311,6 +334,11 @@ class SortingEngine {
                         // Play completion sound
                         this.soundManager.playSound('completed', { volume: 0.6 });
                         
+                        // Reset worker visualizations to clean up the UI
+                        if (this.callbacks.onResetWorkerVisualizations) {
+                            this.callbacks.onResetWorkerVisualizations();
+                        }
+                        
                         if (this.callbacks.onSortingComplete) {
                             this.callbacks.onSortingComplete(this.metrics);
                         }
@@ -336,8 +364,47 @@ class SortingEngine {
                     case 'worker_visual_update':
                         // Update visualization for a specific worker without changing the array
                         if (this.callbacks.onArrayUpdate && this.highlightWorkers) {
-                            // We don't update this.array here as we're just highlighting activity
-                            this.callbacks.onArrayUpdate(this.array, data.indices, data.workerId);
+                            // Pass worker stats if they exist
+                            const workerStats = data.stats || null;
+                            const isMergeOperation = data.mergeOperation || false;
+                            
+                            // If an array is provided with this update, use it
+                            const arrayToUpdate = data.array || this.array;
+                            
+                            this.callbacks.onArrayUpdate(
+                                arrayToUpdate, 
+                                data.indices, 
+                                data.workerId, 
+                                isMergeOperation,
+                                workerStats
+                            );
+                        }
+                        break;
+                    
+                    case 'progress':
+                        // Progress updates from individual workers in multi-threaded mode
+                        if (this.callbacks.onArrayUpdate && this.highlightWorkers) {
+                            // Handle progress updates as visual updates
+                            const workerStats = data.stats || null;
+                            const isMergeOperation = data.mergeOperation || false;
+                            
+                            this.callbacks.onArrayUpdate(
+                                data.array || this.array, 
+                                data.activeIndices || [], 
+                                data.workerId, 
+                                isMergeOperation,
+                                workerStats
+                            );
+                        }
+                        
+                        // Also update metrics based on worker reports
+                        if (data.metrics && this.callbacks.onMetricsUpdate) {
+                            // In multi-threaded mode, we need to combine metrics from all workers
+                            this.metrics.comparisons += data.metrics.comparisons || 0;
+                            this.metrics.swaps += data.metrics.swaps || 0;
+                            this.metrics.accesses += data.metrics.accesses || 0;
+                            
+                            this.callbacks.onMetricsUpdate(this.metrics);
                         }
                         break;
                     
@@ -529,6 +596,12 @@ class SortingEngine {
         
         // Reset the array to its original state
         this.array = [...this.originalArray];
+        
+        // Reset worker visualizations
+        if (this.callbacks.onResetWorkerVisualizations) {
+            this.callbacks.onResetWorkerVisualizations();
+        }
+        
         if (this.callbacks.onArrayUpdate) {
             this.callbacks.onArrayUpdate(this.array);
         }

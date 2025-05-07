@@ -107,8 +107,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function registerCallbacks() {
         sortingEngine.registerCallbacks({
-            onArrayUpdate: (array, indices) => {
-                visualizer.updateArray(array, indices || []);
+            onArrayUpdate: (array, indices, workerId, mergeOperation, workerStats) => {
+                visualizer.updateArray(array, indices || [], [], workerId, mergeOperation, workerStats);
             },
             onMetricsUpdate: (metrics) => {
                 updateMetricsDisplay(metrics);
@@ -123,6 +123,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log('Step complete callback received');
                 updateStepButtonState(true);
                 updateUIState();
+            },
+            onResetWorkerVisualizations: () => {
+                visualizer.resetWorkerVisualizations();
             }
         });
     }
@@ -196,6 +199,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const algorithm = algorithmSelect.value;
         const useMultiThreading = multiThreadedCheckbox.checked && isAlgorithmMultiThreadable(algorithm);
         const threadCount = useMultiThreading ? parseInt(threadCountSelect.value) : 1;
+        
+        // Ensure visualization is fresh before starting
+        visualizer.resetWorkerVisualizations();
         
         // Set the worker delay if multi-threading is enabled
         if (useMultiThreading) {
@@ -401,11 +407,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function sortingComplete() {
         isFirstSort = true;
         
+        // Mark all indices as sorted for visualization
         const sortedIndices = Array.from({ length: sortingEngine.array.length }, (_, i) => i);
         visualizer.highlightElements(sortedIndices, 'sorted');
         
         currentOperationEl.textContent = 'Sorting completed!';
         
+        // Apply completion effect
         visualizer.applyEffect('wave');
         
         updateUIState();

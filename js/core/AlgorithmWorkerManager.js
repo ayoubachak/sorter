@@ -123,12 +123,14 @@ class AlgorithmWorkerManager {
                         // Check if this is a merge operation
                         const isMergeOperation = data.mergeOperation === true;
                         const workerId = data.workerId !== undefined ? data.workerId : null;
+                        const workerStats = data.stats || null;
                         
                         this.callbacks.onArrayUpdate(
                             data.array, 
                             data.indices,
                             workerId,
-                            isMergeOperation
+                            isMergeOperation,
+                            workerStats
                         );
                     }
                     break;
@@ -137,19 +139,23 @@ class AlgorithmWorkerManager {
                     if (this.callbacks.onWorkerVisualUpdate) {
                         // Check if this update includes array state
                         const array = data.array || null;
+                        const workerStats = data.stats || null;
                         
                         if (array) {
                             // If array data is included, update the visualization with it
                             this.callbacks.onWorkerVisualUpdate(
                                 data.workerId, 
                                 data.indices,
-                                array
+                                array,
+                                workerStats
                             );
                         } else {
                             // Otherwise just highlight the indices
                             this.callbacks.onWorkerVisualUpdate(
                                 data.workerId, 
-                                data.indices
+                                data.indices,
+                                null,
+                                workerStats
                             );
                         }
                     }
